@@ -85,6 +85,12 @@ h3 { font-size: 14px; margin: 0; }
 .filter-row > .select { flex: 0 0 160px; width: 160px; min-width: 160px; }
 .filter-row > .field:not(.search) { flex: 0 0 148px; width: 148px; min-width: 148px; }
 .filter-row > .button { flex: 0 0 auto; width: auto; min-width: auto; }
+.date-range-pill { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--line); border-radius: 8px; background: oklch(0.995 0.003 155); padding: 0 10px; min-height: 38px; transition: border-color 160ms var(--ease-out), box-shadow 160ms var(--ease-out); }
+.date-range-pill:focus-within { border-color: oklch(0.72 0.07 164); box-shadow: 0 0 0 3px oklch(0.84 0.06 160 / .35); }
+.date-range-icon { color: var(--ink-muted); flex-shrink: 0; margin-right: 2px; }
+.date-range-sep { color: var(--ink-muted); font-size: 13px; flex-shrink: 0; user-select: none; }
+.date-range-pill input[type="date"] { border: none; background: transparent; padding: 0; min-height: unset; width: 130px; font-size: 13px; color: var(--ink); outline: none; cursor: pointer; }
+.date-range-pill input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.5; cursor: pointer; }
 .status-filter-row { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; }
 .status-filter-pill { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; border: 1px solid var(--line); border-radius: 99px; padding: 0 10px; color: var(--ink-muted); background: var(--surface); font-size: 12px; font-weight: 700; transition: color 160ms var(--ease-out), border-color 160ms var(--ease-out), background-color 160ms var(--ease-out), transform 160ms var(--ease-out); }
 .status-filter-pill:hover { border-color: oklch(0.76 0.04 158); background: var(--surface-muted); }

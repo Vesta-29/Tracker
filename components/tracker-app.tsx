@@ -1,9 +1,9 @@
 "use client";
 
-import { ChangeEvent, Dispatch, FormEvent, SetStateAction, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, Dispatch, FormEvent, SetStateAction, useEffect, useMemo, useRef, useState } from "react";
 import ExcelJS from "exceljs";
 import {
-  Activity, AlertTriangle, BarChart3, CheckCircle2, ChevronLeft, ChevronRight, CircleDot, ClipboardList,
+  Activity, AlertTriangle, BarChart3, CalendarRange, CheckCircle2, ChevronLeft, ChevronRight, CircleDot, ClipboardList,
   Download, FileSpreadsheet, GripVertical, History, ImagePlus, LayoutDashboard, LogOut, Menu, MessageSquareText, Package, Pencil, Plus, Power, RadioTower, Search, Wrench,
   Settings, Trash2, Upload, Users, X, ArrowUp, ArrowDown
 } from "lucide-react";
@@ -77,6 +77,9 @@ export default function TrackerApp() {
   const [mobileMenu, setMobileMenu] = useState(false);
   useEscape(() => setMobileMenu(false), mobileMenu);
 
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [navAttempt, setNavAttempt] = useState<Page | null>(null);
+
   const filtered = useMemo(() => records.filter((r) =>
     (!filters.search || `${r.id} ${r.siteName} ${r.legacyKitNumber ?? ""} ${r.barangay} ${r.municipality}`.toLowerCase().includes(filters.search.toLowerCase())) &&
     (!filters.status || r.status === filters.status) &&
@@ -88,15 +91,25 @@ export default function TrackerApp() {
   ), [records, filters]);
 
   function notify(message: string) { setToast(message); setTimeout(() => setToast(""), 3000); }
-  function save(record: Installation) {
+  function save(record: Installation, dest: Page = "installations") {
     setRecords((current) => { const previous = current.find((item) => item.id === record.id); const audit = installationAudit(previous, record); const saved = { ...record, updatedBy: currentUser, auditEvents: audit ? [audit, ...(record.auditEvents ?? [])] : record.auditEvents ?? [] }; return previous ? current.map((item) => item.id === record.id ? saved : item) : [saved, ...current]; });
-    setEditing(undefined); setPage("installations"); notify("Site record saved.");
+    setEditing(undefined); setPage(dest); setHasUnsavedChanges(false); setNavAttempt(null); notify("Site record saved.");
   }
   function saveServiceVisit(installationId: string, visit: ServiceVisit, components: Component[]) {
     setRecords((current) => current.map((record) => { if (record.id !== installationId) return record; const exists = record.serviceVisits.some((item) => item.id === visit.id); const action = exists ? "updated" : "created"; const audit = createAudit(`service_visit_${action}`, visitAuditSummary(visit, action), ["serviceVisits"]); return { ...record, components, serviceVisits: exists ? record.serviceVisits.map((item) => item.id === visit.id ? visit : item) : [visit, ...record.serviceVisits], updatedBy: currentUser, updatedAt: new Date().toISOString(), auditEvents: [audit, ...record.auditEvents] }; })); notify("Service visit saved.");
   }
   function startEdit(record: Installation) { setEditing(record); setPage("new"); }
-  function navigate(next: Page) { setEditing(undefined); setPage(next); setMobileMenu(false); }
+  function navigate(next: Page) {
+    if (page === "new" && hasUnsavedChanges) {
+      setNavAttempt(next);
+    } else {
+      setEditing(undefined);
+      setPage(next);
+      setMobileMenu(false);
+      setHasUnsavedChanges(false);
+      setNavAttempt(null);
+    }
+  }
   if (!loggedIn) return <Login onLogin={() => setLoggedIn(true)} />;
 
   return (
@@ -116,7 +129,25 @@ export default function TrackerApp() {
           {page === "dashboard" && <Dashboard records={filtered} allRecords={records} refs={refs} filters={filters} setFilters={setFilters} setPage={setPage} />}
           {page === "installations" && <Installations records={filtered} refs={refs} filters={filters} setFilters={setFilters} startEdit={startEdit} setPage={setPage} />}
           {page === "serviceVisits" && <ServiceVisitsPage records={records} refs={refs} onSave={saveServiceVisit} />}
-          {page === "new" && <InstallationForm refs={refs} records={records} initial={editing} onSave={save} onCancel={() => { setEditing(undefined); setPage("installations"); }} />}
+          {page === "new" && (
+            <InstallationForm
+              refs={refs}
+              records={records}
+              initial={editing}
+              onSave={(rec) => {
+                save(rec, navAttempt ?? "installations");
+              }}
+              onCancel={() => {
+                setEditing(undefined);
+                setPage(navAttempt ?? "installations");
+                setHasUnsavedChanges(false);
+                setNavAttempt(null);
+              }}
+              setHasUnsavedChanges={setHasUnsavedChanges}
+              navAttempt={navAttempt}
+              clearNavAttempt={() => setNavAttempt(null)}
+            />
+          )}
           {page === "import" && <ImportRecords refs={refs} records={records} notify={notify} />}
           {page === "settings" && <SettingsPage refs={refs} setRefs={setRefs} records={records} deleteComponentType={(type) => { setRefs({ ...refs, componentTypes: refs.componentTypes.filter((item) => item.id !== type.id) }); setRecords((current) => current.map((record) => ({ ...record, components: record.components.filter((component) => component.type !== type.name) }))); notify(`${type.name} and its saved equipment entries were deleted.`); }} renameRecordReferences={(target, from, to) => setRecords((current) => current.map((record) => ({ ...record, contractor: target === "contractors" && record.contractor === from ? to : record.contractor, unitType: target === "unitTypes" && record.unitType === from ? to : record.unitType, components: target === "componentTypes" ? record.components.map((component) => component.type === from ? { ...component, type: to } : component) : record.components, serviceVisits: target === "serviceVisitTypes" ? record.serviceVisits.map((visit) => visit.type === from ? { ...visit, type: to } : visit) : record.serviceVisits })))} notify={notify} />}
         </div>
@@ -197,11 +228,34 @@ function RecordsTable({ records, onSelect }: { records: Installation[]; onSelect
 }
 
 function ServiceVisitsPage({ records, refs, onSave }: { records: Installation[]; refs: ReferenceData; onSave: (installationId: string, visit: ServiceVisit, components: Component[]) => void }) {
-  const [filters, setFilters] = useState({ search: "", status: "", type: "", contractor: "", from: "", to: "" });
+  const allDates = records.flatMap((r) => r.serviceVisits.map((v) => v.scheduledDate)).filter(Boolean);
+  const minDate = allDates.length ? allDates.reduce((a, b) => (a < b ? a : b)) : "";
+  const maxDate = allDates.length ? allDates.reduce((a, b) => (a > b ? a : b)) : "";
+  const [filters, setFilters] = useState({ search: "", status: "", type: "", contractor: "", from: minDate, to: maxDate });
   const [editing, setEditing] = useState<{ installation: Installation; visit?: ServiceVisit }>();
   const [newInstallationId, setNewInstallationId] = useState(records[0]?.id ?? "");
   const [chooseSite, setChooseSite] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
   useEscape(() => setChooseSite(false), chooseSite);
+
+  // Convert date strings to timestamps for slider math
+  const minTs = minDate ? new Date(minDate).getTime() : 0;
+  const maxTs = maxDate ? new Date(maxDate).getTime() : new Date().getTime();
+  const tsRange = maxTs - minTs || 1;
+  const fromTs = filters.from ? new Date(filters.from).getTime() : minTs;
+  const toTs = filters.to ? new Date(filters.to).getTime() : maxTs;
+  const fromPct = Math.round(((fromTs - minTs) / tsRange) * 100);
+  const toPct = Math.round(((toTs - minTs) / tsRange) * 100);
+  function tsToDate(ts: number) { return new Date(ts).toISOString().split("T")[0]; }
+
+  useEffect(() => {
+    if (!showDatePicker) return;
+    function onDown(e: MouseEvent) { if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) setShowDatePicker(false); }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [showDatePicker]);
+
   const visits = records.flatMap((installation) => installation.serviceVisits.map((visit) => ({ installation, visit }))).filter(({ installation, visit }) =>
     (!filters.search || `${installation.siteName} ${installation.id} ${visit.ticketReference}`.toLowerCase().includes(filters.search.toLowerCase())) &&
     (!filters.status || visit.status === filters.status) && (!filters.type || visit.type === filters.type) && (!filters.contractor || visit.contractor === filters.contractor) &&
@@ -211,7 +265,45 @@ function ServiceVisitsPage({ records, refs, onSave }: { records: Installation[];
   return <>
     <div className="page-head"><div><p className="eyebrow">Field support</p><h1>Service visits</h1><p className="muted">Track contractor maintenance, inspections, repairs, and equipment replacements.</p></div><button className="button primary" onClick={() => setChooseSite(true)}><Plus size={16} />New service visit</button></div>
     <div className="stats">{counts.map(({ status, count }) => <div className="stat" key={status}><div className="small muted">{serviceStatusLabels[status]}</div><div className="stat-value">{count}<Wrench size={17} className="muted" /></div></div>)}</div>
-    <div className="panel"><div className="section"><div className="toolbar filter-row"><input className="field search" aria-label="Search service visits" placeholder="Search site or ticket" value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} /><select className="select" aria-label="Filter service visits by status" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}><option value="">All statuses</option>{Object.entries(serviceStatusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select><select className="select" aria-label="Filter service visits by type" value={filters.type} onChange={(e) => setFilters({ ...filters, type: e.target.value })}><option value="">All visit types</option>{refs.serviceVisitTypes.map((type) => <option key={type.id}>{type.name}</option>)}</select><select className="select" aria-label="Filter service visits by contractor" value={filters.contractor} onChange={(e) => setFilters({ ...filters, contractor: e.target.value })}><option value="">All contractors</option>{refs.contractors.map((contractor) => <option key={contractor.id}>{contractor.name}</option>)}</select><input className="field" type="date" aria-label="From date" value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value })} /><input className="field" type="date" aria-label="To date" value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value })} /></div></div>
+    <div className="panel"><div className="section"><div className="toolbar filter-row">
+      <input className="field search" aria-label="Search service visits" placeholder="Search site or ticket" value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} />
+      <select className="select" aria-label="Filter service visits by status" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}><option value="">All statuses</option>{Object.entries(serviceStatusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
+      <select className="select" aria-label="Filter service visits by type" value={filters.type} onChange={(e) => setFilters({ ...filters, type: e.target.value })}><option value="">All visit types</option>{refs.serviceVisitTypes.map((type) => <option key={type.id}>{type.name}</option>)}</select>
+      <select className="select" aria-label="Filter service visits by contractor" value={filters.contractor} onChange={(e) => setFilters({ ...filters, contractor: e.target.value })}><option value="">All contractors</option>{refs.contractors.map((contractor) => <option key={contractor.id}>{contractor.name}</option>)}</select>
+      <div className="drp-wrap" ref={pickerRef}>
+        <button type="button" className="drp-trigger" aria-expanded={showDatePicker} aria-label="Open date range picker" onClick={() => setShowDatePicker(!showDatePicker)}>
+          <CalendarRange size={13} />
+          <span>{filters.from || minDate || "Start"}</span>
+          <span className="drp-sep">–</span>
+          <span>{filters.to || maxDate || "End"}</span>
+        </button>
+        {showDatePicker && (
+          <div className="drp-panel" role="dialog" aria-label="Date range picker">
+            <div className="drp-heading">Time Range</div>
+            <div className="drp-field">
+              <div className="drp-label-row">
+                <span className="drp-label from">From</span>
+                <input type="date" className="drp-date-input" aria-label="From date" value={filters.from} min={minDate} max={filters.to || maxDate}
+                  onChange={(e) => setFilters({ ...filters, from: e.target.value })} />
+              </div>
+              <input type="range" className="drp-slider drp-slider-from" aria-label="From date slider" min={0} max={100} value={fromPct}
+                style={{ "--drp-pct": `${fromPct}%` } as React.CSSProperties}
+                onChange={(e) => { const ts = minTs + (Number(e.target.value) / 100) * tsRange; const d = tsToDate(ts); if (!filters.to || d <= filters.to) setFilters({ ...filters, from: d }); }} />
+            </div>
+            <div className="drp-field">
+              <div className="drp-label-row">
+                <span className="drp-label to">To</span>
+                <input type="date" className="drp-date-input" aria-label="To date" value={filters.to} min={filters.from || minDate} max={maxDate}
+                  onChange={(e) => setFilters({ ...filters, to: e.target.value })} />
+              </div>
+              <input type="range" className="drp-slider drp-slider-to" aria-label="To date slider" min={0} max={100} value={toPct}
+                style={{ "--drp-pct": `${toPct}%` } as React.CSSProperties}
+                onChange={(e) => { const ts = minTs + (Number(e.target.value) / 100) * tsRange; const d = tsToDate(ts); if (!filters.from || d >= filters.from) setFilters({ ...filters, to: d }); }} />
+            </div>
+          </div>
+        )}
+      </div>
+    </div></div>
       <ServiceVisitTable visits={visits} onSelect={(installation, visit) => setEditing({ installation, visit })} />
     </div>
     {chooseSite && <div className="modal-backdrop" role="presentation"><div className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="choose-visit-site"><div className="modal-header"><div><h2 id="choose-visit-site">Choose a site</h2><p className="muted">Select the site receiving contractor support.</p></div><button type="button" className="button icon-button ghost" aria-label="Close site chooser" onClick={() => setChooseSite(false)}><X size={17} /></button></div><label>Site<select autoFocus className="select" value={newInstallationId} onChange={(e) => setNewInstallationId(e.target.value)}>{records.map((record) => <option value={record.id} key={record.id}>{record.siteName || record.id}</option>)}</select></label><div className="modal-actions"><button type="button" className="button" onClick={() => setChooseSite(false)}>Cancel</button><button type="button" className="button primary" onClick={() => { const installation = records.find((record) => record.id === newInstallationId); if (installation) { setChooseSite(false); setEditing({ installation }); } }}><Plus size={15} />Continue</button></div></div></div>}
@@ -258,14 +350,46 @@ function ServiceVisitModal({ refs, installation, visit, onClose, onSave }: { ref
   </div></div>;
 }
 
-function InstallationForm({ refs, records, initial, onSave, onCancel }: { refs: ReferenceData; records: Installation[]; initial?: Installation; onSave: (r: Installation) => void; onCancel: () => void }) {
+function InstallationForm({
+  refs,
+  records,
+  initial,
+  onSave,
+  onCancel,
+  setHasUnsavedChanges,
+  navAttempt,
+  clearNavAttempt
+}: {
+  refs: ReferenceData;
+  records: Installation[];
+  initial?: Installation;
+  onSave: (r: Installation) => void;
+  onCancel: () => void;
+  setHasUnsavedChanges: (dirty: boolean) => void;
+  navAttempt: Page | null;
+  clearNavAttempt: () => void;
+}) {
   const createdAt = new Date().toISOString();
   const [record, setRecord] = useState<Installation>(initial ?? { id: uid("INS"), siteName: "", unitType: refs.unitTypes.find((x) => x.active)?.name ?? "", contractor: refs.contractors.find((x) => x.active)?.name ?? "", installDate: today(), status: "scheduled", region: "", province: "", municipality: "", barangay: "", address: "", remarks: "", components: [], customValues: {}, photos: [], createdBy: currentUser, createdAt, updatedBy: currentUser, updatedAt: createdAt, serviceVisits: [], auditEvents: [] });
   const [tab, setTab] = useState<"overview" | "visits" | "audit">("overview");
   const [visitOpen, setVisitOpen] = useState<ServiceVisit | null>();
   const [showRemoved, setShowRemoved] = useState(false);
-  const [editingDetails, setEditingDetails] = useState(!initial);
+  const [editingDetails] = useState(true);
   const [noteComponentId, setNoteComponentId] = useState<string>();
+  const [showExitModal, setShowExitModal] = useState(false);
+
+  const [original] = useState<Installation>(() => JSON.parse(JSON.stringify(record)));
+  const isDirty = useMemo(() => {
+    return JSON.stringify(record) !== JSON.stringify(original);
+  }, [record, original]);
+
+  useEffect(() => {
+    setHasUnsavedChanges(isDirty);
+    return () => setHasUnsavedChanges(false);
+  }, [isDirty, setHasUnsavedChanges]);
+
+  const shouldShowExitModal = showExitModal || Boolean(navAttempt);
+
   const duplicate = record.siteName && records.some((r) => r.siteName.toLowerCase() === record.siteName.toLowerCase() && r.id !== record.id);
   const provinces = record.region ? Object.keys(locations[record.region as keyof typeof locations] ?? {}) : [];
   const municipalities = record.region && record.province ? Object.keys((locations[record.region as keyof typeof locations] as Record<string, Record<string, readonly string[]>>)?.[record.province] ?? {}) : [];
@@ -278,14 +402,37 @@ function InstallationForm({ refs, records, initial, onSave, onCancel }: { refs: 
   const duplicateMac = activeComponents.find((component) => componentMacValues(refs, component).some((mac) => allMacs.filter((value) => value === mac).length > 1 || records.some((installation) => installation.id !== record.id && installation.components.some((existing) => !existing.removedAt && componentMacValues(refs, existing).includes(mac)))));
   const duplicateMacInstallation = duplicateMac && records.find((installation) => installation.id !== record.id && installation.components.some((existing) => !existing.removedAt && componentMacValues(refs, existing).some((mac) => componentMacValues(refs, duplicateMac).includes(mac))));
   const missingComponentValue = activeComponents.some((component) => visibleComponentFields(refs, component).some((field) => field.active && field.required && !(component.values ?? {})[field.id]?.trim()));
+
   function submit(e: FormEvent) { e.preventDefault(); if (duplicate || invalidMac || missingComponentValue || (duplicateMac && !duplicateMac.duplicateMacAcknowledged)) return; onSave({ ...record, components: record.components.map((component) => ({ ...component, values: Object.fromEntries(Object.entries(component.values ?? {}).map(([id, value]) => { const attachment = visibleComponentFields(refs, component).find((field) => field.id === id); return [id, attachment && libraryField(refs, attachment)?.type === "mac" && value ? normalizeMac(value) : value]; })) })), updatedAt: new Date().toISOString() }); }
   function addComponent() { patch({ components: [...record.components, { id: uid("CMP"), type: refs.componentTypes.find((x) => x.active)?.name ?? "", values: {}, notes: "", installedAt: new Date().toISOString() }] }); }
   function componentPatch(id: string, data: Partial<Component>) { patch({ components: record.components.map((c) => c.id === id ? { ...c, ...data } : c) }); }
   function photos(e: ChangeEvent<HTMLInputElement>) { const files = Array.from(e.target.files ?? []).slice(0, 4); patch({ photos: [...record.photos, ...files.map((file) => ({ name: file.name, url: URL.createObjectURL(file) }))] }); }
+
+  function handleDiscard() {
+    setShowExitModal(false);
+    clearNavAttempt();
+    onCancel();
+  }
+
+  function handleKeepEditing() {
+    setShowExitModal(false);
+    // Keep navAttempt intact — user chose to stay; navAttempt will re-trigger if they navigate again
+    clearNavAttempt();
+  }
+
+  function handleSaveAndExit() {
+    if (duplicate || invalidMac || missingComponentValue || (duplicateMac && !duplicateMac.duplicateMacAcknowledged)) {
+      alert("Please fix form validation errors before saving.");
+      return;
+    }
+    setShowExitModal(false);
+    onSave({ ...record, components: record.components.map((component) => ({ ...component, values: Object.fromEntries(Object.entries(component.values ?? {}).map(([id, value]) => { const attachment = visibleComponentFields(refs, component).find((field) => field.id === id); return [id, attachment && libraryField(refs, attachment)?.type === "mac" && value ? normalizeMac(value) : value]; })) })), updatedAt: new Date().toISOString() });
+  }
+
   return <form onSubmit={submit}>
-    <div className="page-head site-record-head"><div><p className="eyebrow">{initial ? "Site record" : "New site"}</p><div className="site-record-heading-row"><h1>{initial ? initial.siteName || "Site name required" : "Add a site record"}</h1>{initial && <StatusPill status={record.status} />}</div>{initial && <div className="small muted record-id">Installation ID: {initial.id}</div>}<p className="muted site-record-description">{editingDetails ? "Update site details and deployed equipment." : "Review site details, contractor visits, and change history."}</p></div><div className="toolbar site-record-actions"><button type="button" className="button" onClick={onCancel}>{initial ? "Back to sites" : "Cancel"}</button>{initial && editingDetails && <button type="button" className="button" onClick={() => setEditingDetails(false)}>Stop editing</button>}{editingDetails ? <button className="button primary">{initial ? "Save changes" : "Save site"}</button> : <button type="button" className="button primary" onClick={() => { setTab("overview"); setEditingDetails(true); }}><Pencil size={15} />Edit site details</button>}</div></div>
+    <div className="page-head site-record-head"><div><p className="eyebrow">{initial ? "Site record" : "New site"}</p><div className="site-record-heading-row"><h1>{initial ? initial.siteName || "Site name required" : "Add a site record"}</h1>{initial && <StatusPill status={record.status} />}</div>{initial && <div className="small muted record-id">Installation ID: {initial.id}</div>}<p className="muted site-record-description">{initial ? "Update site details and deployed equipment." : "Review site details, contractor visits, and change history."}</p></div><div className="toolbar site-record-actions"><button type="button" className="button" onClick={() => { if (isDirty) { setShowExitModal(true); } else { onCancel(); } }}>{initial ? "Back to sites" : "Cancel"}</button><button className="button primary">{initial ? "Save changes" : "Save site"}</button></div></div>
     <div className="tabs" role="tablist" aria-label="Site record sections"><button type="button" role="tab" aria-selected={tab === "overview"} className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}>Overview</button><button type="button" role="tab" aria-selected={tab === "visits"} className={tab === "visits" ? "active" : ""} onClick={() => setTab("visits")}>Service visits <span>{record.serviceVisits.length}</span></button><button type="button" role="tab" aria-selected={tab === "audit"} className={tab === "audit" ? "active" : ""} onClick={() => setTab("audit")}>Change log <span>{record.auditEvents.length}</span></button></div>
-    {tab === "overview" && <fieldset className={`panel site-fields ${editingDetails ? "editing" : "viewing"}`} role="tabpanel" disabled={!editingDetails}>
+    {tab === "overview" && <fieldset className="panel site-fields editing" role="tabpanel">
       <section className="section ownership-grid"><div><span className="small muted">Created by</span><strong>{record.createdBy}</strong></div><div><span className="small muted">Created</span><strong>{niceDateTime(record.createdAt)}</strong></div><div><span className="small muted">Updated by</span><strong>{record.updatedBy}</strong></div><div><span className="small muted">Last updated</span><strong>{niceDateTime(record.updatedAt)}</strong></div></section>
       <section id="site-details-section" className="section site-details-polish site-details-guided"><div className="section-title"><div><h2>Site details</h2><span className="small muted">Identity, ownership, and current installation state</span></div></div><div className="grid-3">
         <label>Site name<input required className="field" value={record.siteName} onChange={(e) => patch({ siteName: e.target.value })} placeholder="Workplace site name" /></label>
@@ -314,6 +461,35 @@ function InstallationForm({ refs, records, initial, onSave, onCancel }: { refs: 
     {tab === "audit" && <div className="panel" role="tabpanel"><div className="panel-head"><div><h2>Change log</h2><div className="small muted">Permanent history of record updates and service activity</div></div><History size={18} className="muted" /></div><AuditTimeline events={record.auditEvents} /></div>}
     {noteComponentId && <ComponentNoteModal component={record.components.find((component) => component.id === noteComponentId)} onChange={(notes) => componentPatch(noteComponentId, { notes })} onClose={() => setNoteComponentId(undefined)} />}
     {visitOpen !== undefined && <ServiceVisitModal refs={refs} installation={record} visit={visitOpen ?? undefined} onClose={() => setVisitOpen(undefined)} onSave={(visit, components) => { const exists = record.serviceVisits.some((item) => item.id === visit.id); const action = exists ? "updated" : "created"; const audit = createAudit(`service_visit_${action}`, visitAuditSummary(visit, action), ["serviceVisits"]); patch({ components, serviceVisits: exists ? record.serviceVisits.map((item) => item.id === visit.id ? visit : item) : [visit, ...record.serviceVisits], auditEvents: [audit, ...record.auditEvents] }); setVisitOpen(undefined); }} />}
+
+    {shouldShowExitModal && (
+      <div className="modal-backdrop" role="presentation">
+        <div className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="exit-confirm-title" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-header">
+            <div>
+              <h2 id="exit-confirm-title">Unsaved Changes</h2>
+              <p className="muted" style={{ marginTop: 8 }}>
+                You have edited the site details. Would you like to save your changes before exiting, or discard them and lose all new data?
+              </p>
+            </div>
+            <button type="button" className="button icon-button ghost" aria-label="Close" onClick={handleKeepEditing}>
+              <X size={17} />
+            </button>
+          </div>
+          <div className="modal-actions" style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 24 }}>
+            <button type="button" className="button danger" onClick={handleDiscard}>
+              Discard changes
+            </button>
+            <button type="button" className="button" onClick={handleKeepEditing}>
+              Keep editing
+            </button>
+            <button type="button" className="button primary" onClick={handleSaveAndExit}>
+              Save changes
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
   </form>;
 }
 
@@ -471,4 +647,8 @@ async function downloadXlsx(records: Installation[], refs: ReferenceData) {
   wb.addWorksheet("Components").addRows([["Installation ID", "Component Type", "Notes", ...labels], ...records.flatMap((record) => record.components.map((component) => { const fields = componentType(refs, component.type)?.fields ?? []; return [record.id, component.type, component.notes, ...labels.map((label) => { const field = fields.find((item) => libraryField(refs, item)?.label === label); return field ? (component.values ?? {})[field.id] ?? "" : ""; })]; }))]);
   const buffer = await wb.xlsx.writeBuffer(); const link = document.createElement("a");
   link.href = URL.createObjectURL(new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })); link.download = `fieldtrack-export-${today()}.xlsx`; link.click();
+}
+
+function setChooseSite(arg0: boolean): void {
+  throw new Error("Function not implemented.");
 }
