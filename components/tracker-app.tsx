@@ -3,7 +3,7 @@
 import { ChangeEvent, Dispatch, FormEvent, SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ExcelJS from "exceljs";
 import {
-  Activity, AlertTriangle, BarChart3, CalendarRange, CheckCircle2, ChevronLeft, ChevronRight, CircleDot, ClipboardList,
+  Activity, AlertTriangle, ArrowDownAZ, ArrowUpAZ, BarChart3, CalendarRange, CheckCircle2, ChevronLeft, ChevronRight, CircleDot, ClipboardList,
   Download, FileSpreadsheet, GripVertical, History, ImagePlus, LayoutDashboard, LogOut, Menu, MessageSquareText, Package, Pencil, Plus, Power, RadioTower, Search, Wrench,
   Settings, Trash2, Upload, Users, X, ArrowUp, ArrowDown
 } from "lucide-react";
@@ -329,13 +329,32 @@ function Installations({ records, allRecords, refs, filters, setFilters, startEd
   return <>
     <div className="page-head"><div><p className="eyebrow">Registry</p><h1>Sites</h1><p className="muted">Find a site record and review its deployed equipment.</p></div><div className="toolbar"><button className="button" onClick={() => downloadCsv(records, refs)}><Download size={16} />Export CSV</button><button className="button" onClick={() => downloadXlsx(records, refs)}><FileSpreadsheet size={16} />Export XLSX</button><button className="button primary" onClick={() => setPage("new")}><Plus size={16} />Add site</button></div></div>
     <div style={{ marginBottom: 16 }}><FilterBar records={allRecords} refs={refs} filters={filters} setFilters={setFilters} /></div>
-    <div className="panel"><div className="panel-head"><strong>{records.length} records</strong><span className="small muted">Showing 1-{Math.min(records.length, 20)} of {records.length}</span></div><RecordsTable records={records} onSelect={startEdit} /><div className="pagination"><span className="small muted">20 rows per page</span><div className="toolbar"><button className="button icon-button" aria-label="Previous page" disabled><ChevronLeft size={16} /></button><button className="button icon-button" aria-label="Next page" disabled><ChevronRight size={16} /></button></div></div></div>
+    <div className="panel"><div className="panel-head"><strong>{records.length} records</strong><span className="small muted">Showing 1-{Math.min(records.length, 20)} of {records.length}</span></div><RecordsTable records={records} onSelect={startEdit} detailed /><div className="pagination"><span className="small muted">20 rows per page</span><div className="toolbar"><button className="button icon-button" aria-label="Previous page" disabled><ChevronLeft size={16} /></button><button className="button icon-button" aria-label="Next page" disabled><ChevronRight size={16} /></button></div></div></div>
   </>;
 }
 
-function RecordsTable({ records, onSelect }: { records: Installation[]; onSelect?: (r: Installation) => void }) {
+type SiteSortKey = "siteName" | "id" | "islandGroup" | "location" | "unitType" | "contractor" | "installDate" | "status" | "equipment" | "updatedBy";
+function SiteSortHeader({ label, column, sortable, sort, onSort }: { label: string; column: SiteSortKey; sortable: boolean; sort?: { key: SiteSortKey; direction: "asc" | "desc" }; onSort: (key: SiteSortKey) => void }) {
+  if (!sortable) return <th>{label}</th>;
+  const active = sort?.key === column;
+  return <th aria-sort={active ? sort.direction === "asc" ? "ascending" : "descending" : "none"}><button type="button" className={`table-sort ${active ? "active" : ""}`} onClick={() => onSort(column)}>{label}{active && sort.direction === "desc" ? <ArrowDownAZ size={14} /> : <ArrowUpAZ size={14} />}</button></th>;
+}
+function RecordsTable({ records, onSelect, detailed = false }: { records: Installation[]; onSelect?: (r: Installation) => void; detailed?: boolean }) {
+  const [sort, setSort] = useState<{ key: SiteSortKey; direction: "asc" | "desc" }>();
+  const sortable = detailed;
+  const sortedRecords = useMemo(() => {
+    if (!sort) return records;
+    const read = (record: Installation) => sort.key === "location" ? `${record.barangay} ${record.municipality}` : sort.key === "equipment" ? record.components.length : record[sort.key];
+    return records.map((record, index) => ({ record, index })).sort((a, b) => {
+      const left = read(a.record); const right = read(b.record);
+      const compared = typeof left === "number" && typeof right === "number" ? left - right : String(left ?? "").localeCompare(String(right ?? ""), undefined, { numeric: true, sensitivity: "base" });
+      return (sort.direction === "asc" ? compared : -compared) || a.index - b.index;
+    }).map(({ record }) => record);
+  }, [records, sort]);
+  function toggleSort(key: SiteSortKey) { if (!sortable) return; setSort((current) => current?.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: "asc" }); }
   if (!records.length) return <div className="empty"><ClipboardList size={25} /><p><strong>No sites match these filters.</strong></p><span>Clear a filter or add a site record.</span></div>;
-  return <div className="table-wrap"><table><thead><tr><th>Site name</th><th>Installation ID</th><th>Location</th><th>Contractor</th><th>Installation date</th><th>Status</th><th>Equipment</th>{onSelect && <th><span className="sr-only">Actions</span></th>}</tr></thead><tbody>{records.map((r) => <tr key={r.id} onClick={() => onSelect?.(r)} style={{ cursor: onSelect ? "pointer" : "default" }}><td>{r.siteName || <span className="pill issue">Site name required</span>}</td><td><strong>{r.id}</strong></td><td>{r.barangay}, {r.municipality}</td><td>{r.contractor}</td><td>{niceDate(r.installDate)}</td><td><StatusPill status={r.status} /></td><td>{r.components.length}</td>{onSelect && <td><button type="button" className="button icon-button ghost" aria-label={`View ${r.siteName || r.id}`} onClick={(event) => { event.stopPropagation(); onSelect(r); }}><ChevronRight size={16} /></button></td>}</tr>)}</tbody></table></div>;
+  const sortHeader = (label: string, column: SiteSortKey) => <SiteSortHeader label={label} column={column} sortable={sortable} sort={sort} onSort={toggleSort} />;
+  return <div className="table-wrap"><table><thead><tr>{sortHeader("Site name", "siteName")}{sortHeader("Installation ID", "id")}{detailed && sortHeader("Island group", "islandGroup")}{sortHeader("Location", "location")}{detailed && sortHeader("Unit type", "unitType")}{sortHeader("Contractor", "contractor")}{sortHeader("Installation date", "installDate")}{sortHeader("Status", "status")}{sortHeader("Equipment", "equipment")}{detailed && sortHeader("Updated by", "updatedBy")}{onSelect && <th><span className="sr-only">Actions</span></th>}</tr></thead><tbody>{sortedRecords.map((r) => <tr key={r.id} onClick={() => onSelect?.(r)} style={{ cursor: onSelect ? "pointer" : "default" }}><td>{r.siteName || <span className="pill issue">Site name required</span>}</td><td><strong>{r.id}</strong></td>{detailed && <td>{r.islandGroup || "None"}</td>}<td>{r.barangay}, {r.municipality}</td>{detailed && <td>{r.unitType}</td>}<td>{r.contractor}</td><td>{niceDate(r.installDate)}</td><td><StatusPill status={r.status} /></td><td>{r.components.length}</td>{detailed && <td>{r.updatedBy}</td>}{onSelect && <td><button type="button" className="button icon-button ghost" aria-label={`View ${r.siteName || r.id}`} onClick={(event) => { event.stopPropagation(); onSelect(r); }}><ChevronRight size={16} /></button></td>}</tr>)}</tbody></table></div>;
 }
 
 function ServiceVisitsPage({ records, refs, actorName, onSave }: { records: Installation[]; refs: ReferenceData; actorName: string; onSave: (installationId: string, visit: ServiceVisit, components: Component[]) => void }) {

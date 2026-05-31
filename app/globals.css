@@ -137,6 +137,11 @@ h3 { font-size: 14px; margin: 0; }
 .location-combobox-empty { padding: 11px 9px; color: var(--ink-muted); font-size: 12px; text-align: center; }
 label { display: grid; gap: 6px; color: var(--ink-muted); font-size: 12px; font-weight: 700; }
 .table-wrap { overflow-x: auto; }
+.table-sort { display: inline-flex; align-items: center; gap: 5px; border: 0; padding: 0; color: inherit; background: transparent; font: inherit; font-weight: inherit; cursor: pointer; white-space: nowrap; }
+.table-sort svg { color: var(--ink-muted); opacity: .58; }
+.table-sort:hover, .table-sort.active { color: var(--accent); }
+.table-sort.active svg { color: var(--accent); opacity: 1; }
+.table-sort:focus-visible { border-radius: 3px; outline: 2px solid var(--accent); outline-offset: 3px; }
 table { width: 100%; border-collapse: collapse; min-width: 900px; }
 th { color: var(--ink-muted); background: oklch(0.975 0.008 155); font-size: 11px; letter-spacing: .07em; text-align: left; text-transform: uppercase; }
 th, td { padding: 12px 14px; border-bottom: 1px solid var(--line); white-space: nowrap; }
