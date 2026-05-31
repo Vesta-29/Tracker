@@ -1,4 +1,5 @@
 export type Status = "scheduled" | "installed" | "issue" | "cancelled";
+export type IslandGroup = "Luzon" | "Visayas" | "Mindanao";
 
 export type Component = {
   id: string;
@@ -100,10 +101,15 @@ export type Installation = {
   contractor: string;
   installDate: string;
   status: Status;
+  islandGroup: IslandGroup | "";
   region: string;
+  regionCode: string;
   province: string;
+  provinceCode: string;
   municipality: string;
+  municipalityCode: string;
   barangay: string;
+  barangayCode: string;
   address: string;
   remarks: string;
   components: Component[];

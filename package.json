@@ -6,9 +6,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "seed:psgc": "node scripts/seed-psgc.mjs",
+    "check:psgc": "node scripts/check-psgc.mjs"
   },
   "dependencies": {
+    "@jobuntux/psgc": "0.2.1",
     "@supabase/ssr": "^0.7.0",
     "@supabase/supabase-js": "^2.57.4",
     "exceljs": "^4.4.0",

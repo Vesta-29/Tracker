@@ -1,39 +1,12 @@
 import type { Installation, ReferenceData } from "@/lib/types";
+import { requireLocation } from "@/lib/locations";
 
-export const locations = {
-  "Region III": {
-    Bulacan: {
-      "San Jose del Monte": ["Gaya-gaya", "Muzon", "Tungkong Mangga"],
-      Malolos: ["Babatnin", "Bulihan", "Guinhawa"],
-    },
-    Pampanga: {
-      Angeles: ["Balibago", "Pampang", "Pulungbulu"],
-      "San Fernando": ["Dolores", "Sindalan", "Telabastagan"],
-    },
-  },
-  CALABARZON: {
-    Batangas: {
-      Lipa: ["Balintawak", "Marawoy", "Sabang"],
-      Tanauan: ["Darasa", "Janopol", "Santor"],
-    },
-    Laguna: {
-      Calamba: ["Bucal", "Canlubang", "Real"],
-      "Santa Rosa": ["Balibago", "Dita", "Tagapo"],
-    },
-  },
-  "Region V": {
-    Albay: {
-      Legazpi: ["Bogtong", "Daraga", "Rawis"],
-      Tabaco: ["Bangkilingan", "San Carlos", "Tayhi"],
-    },
-  },
-  "Region VII": {
-    Cebu: {
-      "Cebu City": ["Apas", "Lahug", "Talamban"],
-      "Lapu-Lapu City": ["Basak", "Maribago", "Pusok"],
-    },
-  },
-} as const;
+const cebuLahug = requireLocation({ regionCode: "0700000000", provinceCode: "0730600000", municipalityCode: "30600", barangayCode: "0730600041" });
+const bulacanMuzon = requireLocation({ regionCode: "0300000000", provinceCode: "0301400000", municipalityCode: "0301420000", barangayCode: "0301420007" });
+const albayRawis = requireLocation({ regionCode: "0500000000", provinceCode: "0500500000", municipalityCode: "0500506000", barangayCode: "0500506064" });
+const lagunaCanlubang = requireLocation({ regionCode: "0400000000", provinceCode: "0403400000", municipalityCode: "0403405000", barangayCode: "0403405011" });
+const angelesBalibago = requireLocation({ regionCode: "0300000000", provinceCode: "0330100000", municipalityCode: "30100", barangayCode: "0330100003" });
+const batangasSabang = requireLocation({ regionCode: "0400000000", provinceCode: "0401000000", municipalityCode: "0401014000", barangayCode: "0401014054" });
 
 export const defaultReferences: ReferenceData = {
   contractors: [
@@ -79,8 +52,8 @@ export const defaultReferences: ReferenceData = {
 export const demoInstallations: Installation[] = [
   {
     id: "INS-2026-0018", siteName: "", legacyKitNumber: "KIT-10482", unitType: "Satellite broadband", contractor: "Lighthouse Network Services",
-    installDate: "2026-05-28", status: "installed", region: "Region VII", province: "Cebu", municipality: "Cebu City",
-    barangay: "Lahug", address: "Sitio Banilad", remarks: "Activation confirmed.", createdBy: "Maria Santos", createdAt: "2026-05-28T09:10:00", updatedBy: "Maria Santos",
+    installDate: "2026-05-28", status: "installed", ...cebuLahug,
+    address: "Sitio Banilad", remarks: "Activation confirmed.", createdBy: "Maria Santos", createdAt: "2026-05-28T09:10:00", updatedBy: "Maria Santos",
     updatedAt: "2026-05-28T10:31:00", photos: [], customValues: { "field-work-order": "WO-260528-14", "field-priority": "Standard" }, components: [
       { id: "C-1", type: "Dish antenna", values: { "dish-serial": "DSH-62884" }, notes: "", installedAt: "2026-05-28T09:10:00" },
       { id: "C-2", type: "Modem", values: { "modem-serial": "MDM-81124", "modem-mac": "A4:5E:60:11:28:9C" }, notes: "", installedAt: "2026-05-28T09:10:00" },
@@ -90,8 +63,8 @@ export const demoInstallations: Installation[] = [
   },
   {
     id: "INS-2026-0017", siteName: "", legacyKitNumber: "KIT-10479", unitType: "Fixed wireless", contractor: "Northline Systems",
-    installDate: "2026-05-27", status: "issue", region: "Region III", province: "Bulacan", municipality: "San Jose del Monte",
-    barangay: "Muzon", address: "Purok 4", remarks: "Waiting for replacement outdoor radio.", createdBy: "Maria Santos", createdAt: "2026-05-27T13:12:00", updatedBy: "Jon Reyes",
+    installDate: "2026-05-27", status: "issue", ...bulacanMuzon,
+    address: "Purok 4", remarks: "Waiting for replacement outdoor radio.", createdBy: "Maria Santos", createdAt: "2026-05-27T13:12:00", updatedBy: "Jon Reyes",
     updatedAt: "2026-05-28T08:20:00", photos: [], customValues: { "field-priority": "High priority" }, components: [
       { id: "C-3", type: "Outdoor radio", values: { "radio-serial": "ODR-30295", "radio-mac": "10:62:E5:40:19:AF" }, notes: "Intermittent signal", installedAt: "2026-05-27T13:12:00" },
     ],
@@ -100,8 +73,8 @@ export const demoInstallations: Installation[] = [
   },
   {
     id: "INS-2026-0016", siteName: "", legacyKitNumber: "KIT-10474", unitType: "Satellite broadband", contractor: "Pacific Link Solutions",
-    installDate: "2026-05-26", status: "installed", region: "Region V", province: "Albay", municipality: "Legazpi",
-    barangay: "Rawis", address: "", remarks: "", createdBy: "Jon Reyes", createdAt: "2026-05-26T15:40:00", updatedBy: "Jon Reyes",
+    installDate: "2026-05-26", status: "installed", ...albayRawis,
+    address: "", remarks: "", createdBy: "Jon Reyes", createdAt: "2026-05-26T15:40:00", updatedBy: "Jon Reyes",
     updatedAt: "2026-05-26T16:44:00", photos: [], customValues: {}, components: [
       { id: "C-4", type: "Dish antenna", values: { "dish-serial": "DSH-62010" }, notes: "", installedAt: "2026-05-26T15:40:00" },
       { id: "C-5", type: "Router", values: { "router-serial": "RTR-78426" }, notes: "", installedAt: "2026-05-26T15:40:00" },
@@ -110,20 +83,20 @@ export const demoInstallations: Installation[] = [
   },
   {
     id: "INS-2026-0015", siteName: "", legacyKitNumber: "KIT-10471", unitType: "Fiber internet", contractor: "SignalWorks PH",
-    installDate: "2026-05-26", status: "scheduled", region: "CALABARZON", province: "Laguna", municipality: "Calamba",
-    barangay: "Canlubang", address: "Phase 2", remarks: "Site access confirmed for morning schedule.", createdBy: "Jon Reyes", createdAt: "2026-05-26T09:15:00", updatedBy: "Jon Reyes",
+    installDate: "2026-05-26", status: "scheduled", ...lagunaCanlubang,
+    address: "Phase 2", remarks: "Site access confirmed for morning schedule.", createdBy: "Jon Reyes", createdAt: "2026-05-26T09:15:00", updatedBy: "Jon Reyes",
     updatedAt: "2026-05-26T09:15:00", photos: [], customValues: {}, components: [], serviceVisits: [], auditEvents: [{ id: "AUDIT-006", action: "created", actor: "Jon Reyes", createdAt: "2026-05-26T09:15:00", summary: "Jon Reyes created this site record." }],
   },
   {
     id: "INS-2026-0014", siteName: "", legacyKitNumber: "KIT-10465", unitType: "Fixed wireless", contractor: "Northline Systems",
-    installDate: "2026-05-24", status: "cancelled", region: "Region III", province: "Pampanga", municipality: "Angeles",
-    barangay: "Balibago", address: "", remarks: "Cancelled by site coordinator.", createdBy: "Maria Santos", createdAt: "2026-05-24T13:44:00", updatedBy: "Maria Santos",
+    installDate: "2026-05-24", status: "cancelled", ...angelesBalibago,
+    address: "", remarks: "Cancelled by site coordinator.", createdBy: "Maria Santos", createdAt: "2026-05-24T13:44:00", updatedBy: "Maria Santos",
     updatedAt: "2026-05-25T11:12:00", photos: [], customValues: {}, components: [], serviceVisits: [], auditEvents: [{ id: "AUDIT-007", action: "created", actor: "Maria Santos", createdAt: "2026-05-24T13:44:00", summary: "Maria Santos created this site record." }],
   },
   {
     id: "INS-2026-0013", siteName: "", legacyKitNumber: "KIT-10458", unitType: "Satellite broadband", contractor: "Lighthouse Network Services",
-    installDate: "2026-05-23", status: "installed", region: "CALABARZON", province: "Batangas", municipality: "Lipa",
-    barangay: "Sabang", address: "", remarks: "", createdBy: "Maria Santos", createdAt: "2026-05-23T15:10:00", updatedBy: "Maria Santos",
+    installDate: "2026-05-23", status: "installed", ...batangasSabang,
+    address: "", remarks: "", createdBy: "Maria Santos", createdAt: "2026-05-23T15:10:00", updatedBy: "Maria Santos",
     updatedAt: "2026-05-23T15:10:00", photos: [], customValues: {}, components: [], serviceVisits: [], auditEvents: [{ id: "AUDIT-008", action: "created", actor: "Maria Santos", createdAt: "2026-05-23T15:10:00", summary: "Maria Santos created this site record." }],
   },
 ];

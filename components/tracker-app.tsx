@@ -7,13 +7,14 @@ import {
   Download, FileSpreadsheet, GripVertical, History, ImagePlus, LayoutDashboard, LogOut, Menu, MessageSquareText, Package, Pencil, Plus, Power, RadioTower, Search, Wrench,
   Settings, Trash2, Upload, Users, X, ArrowUp, ArrowDown
 } from "lucide-react";
-import { defaultReferences, demoInstallations, locations } from "@/lib/demo-data";
+import { defaultReferences, demoInstallations } from "@/lib/demo-data";
+import { islandGroups, listBarangays, listMuncities, listProvinces, listRegions, resolveLocation } from "@/lib/locations";
 import type { AuditEvent, Component, ComponentFieldAttachment, ComponentTypeOption, CustomFieldDefinition, CustomFieldType, EquipmentFieldLibraryItem, Installation, ReferenceData, ReferenceOption, ServiceVisit, ServiceVisitStatus, Status } from "@/lib/types";
 
 type Page = "dashboard" | "installations" | "new" | "serviceVisits" | "import" | "settings";
-type Filter = { search: string; status: string; contractor: string; region: string; province: string; municipality: string; barangay: string };
+type Filter = { search: string; status: string; contractor: string; islandGroup: string; regionCode: string; provinceCode: string; municipalityCode: string; barangayCode: string; from: string; to: string };
 type ImportRow = { row: number; kind: "Site" | "Equipment"; subject: string; details: string; reference: string; valid: boolean; issue: string };
-const emptyFilter: Filter = { search: "", status: "", contractor: "", region: "", province: "", municipality: "", barangay: "" };
+const emptyFilter: Filter = { search: "", status: "", contractor: "", islandGroup: "", regionCode: "", provinceCode: "", municipalityCode: "", barangayCode: "", from: "", to: "" };
 const statusMeta: Record<Status, { label: string; color: string }> = {
   installed: { label: "Installed", color: "oklch(0.58 0.13 155)" },
   scheduled: { label: "Scheduled", color: "oklch(0.58 0.14 245)" },
@@ -49,13 +50,13 @@ function componentMacValues(refs: ReferenceData, component: Component) { return 
 function StatusPill({ status }: { status: Status }) { return <span className={`pill ${status}`}><span className="status-dot" style={{ background: statusMeta[status].color }} />{statusMeta[status].label}</span>; }
 const currentUser = "Maria Santos";
 const serviceStatusLabels: Record<ServiceVisitStatus, string> = { scheduled: "Scheduled", in_progress: "In progress", completed: "Completed", cancelled: "Cancelled" };
-const auditFieldLabels: Record<string, string> = { siteName: "site name", unitType: "unit type", contractor: "contractor", installDate: "installation date", status: "status", region: "region", province: "province", municipality: "city or municipality", barangay: "barangay", address: "site address", remarks: "remarks" };
+const auditFieldLabels: Record<string, string> = { siteName: "site name", unitType: "unit type", contractor: "contractor", installDate: "installation date", status: "status", islandGroup: "island group", region: "region", province: "province", municipality: "locality", barangay: "barangay", address: "site address", remarks: "remarks" };
 function createAudit(action: string, summary: string, changedFields: string[] = [], beforeData?: Record<string, unknown>, afterData?: Record<string, unknown>): AuditEvent { return { id: uid("AUDIT"), action, actor: currentUser, createdAt: new Date().toISOString(), summary, changedFields, beforeData, afterData }; }
 function auditValue(field: string, value: unknown) { if (field === "status" && typeof value === "string" && value in statusMeta) return statusMeta[value as Status].label; return String(value || "blank"); }
 function visitAuditSummary(visit: ServiceVisit, action: "created" | "updated") { const equipment = visit.componentChanges.map((change) => change.summary.toLowerCase()).join(", "); return `${currentUser} ${action} ${visit.type.toLowerCase()} service visit ${visit.id}${visit.ticketReference ? ` for ticket ${visit.ticketReference}` : ""}${equipment ? `. Equipment changes: ${equipment}` : ""}.`; }
 function installationAudit(previous: Installation | undefined, next: Installation) {
   if (!previous) return createAudit("created", `${currentUser} created this site record.`);
-  const tracked = ["siteName", "unitType", "contractor", "installDate", "status", "region", "province", "municipality", "barangay", "address", "remarks"] as const;
+  const tracked = ["siteName", "unitType", "contractor", "installDate", "status", "islandGroup", "region", "province", "municipality", "barangay", "address", "remarks"] as const;
   const changed = tracked.filter((field) => previous[field] !== next[field]);
   const equipmentChanged = JSON.stringify(previous.components) !== JSON.stringify(next.components);
   const customFieldsChanged = JSON.stringify(previous.customValues) !== JSON.stringify(next.customValues);
@@ -84,10 +85,13 @@ export default function TrackerApp() {
     (!filters.search || `${r.id} ${r.siteName} ${r.legacyKitNumber ?? ""} ${r.barangay} ${r.municipality}`.toLowerCase().includes(filters.search.toLowerCase())) &&
     (!filters.status || r.status === filters.status) &&
     (!filters.contractor || r.contractor === filters.contractor) &&
-    (!filters.region || r.region === filters.region) &&
-    (!filters.province || r.province === filters.province) &&
-    (!filters.municipality || r.municipality === filters.municipality) &&
-    (!filters.barangay || r.barangay === filters.barangay)
+    (!filters.islandGroup || r.islandGroup === filters.islandGroup) &&
+    (!filters.regionCode || r.regionCode === filters.regionCode) &&
+    (!filters.provinceCode || r.provinceCode === filters.provinceCode) &&
+    (!filters.municipalityCode || r.municipalityCode === filters.municipalityCode) &&
+    (!filters.barangayCode || r.barangayCode === filters.barangayCode) &&
+    (!filters.from || r.installDate >= filters.from) &&
+    (!filters.to || r.installDate <= filters.to)
   ), [records, filters]);
 
   function notify(message: string) { setToast(message); setTimeout(() => setToast(""), 3000); }
@@ -127,7 +131,7 @@ export default function TrackerApp() {
 
         <div className="content">
           {page === "dashboard" && <Dashboard records={filtered} allRecords={records} refs={refs} filters={filters} setFilters={setFilters} setPage={setPage} />}
-          {page === "installations" && <Installations records={filtered} refs={refs} filters={filters} setFilters={setFilters} startEdit={startEdit} setPage={setPage} />}
+          {page === "installations" && <Installations records={filtered} allRecords={records} refs={refs} filters={filters} setFilters={setFilters} startEdit={startEdit} setPage={setPage} />}
           {page === "serviceVisits" && <ServiceVisitsPage records={records} refs={refs} onSave={saveServiceVisit} />}
           {page === "new" && (
             <InstallationForm
@@ -173,25 +177,93 @@ function Login({ onLogin }: { onLogin: () => void }) {
   </form></div>;
 }
 
-function FilterBar({ refs, filters, setFilters }: { refs: ReferenceData; filters: Filter; setFilters: (f: Filter) => void }) {
-  const locationRecords = Object.entries(locations).flatMap(([region, provinces]) => Object.entries(provinces).flatMap(([province, municipalities]) => Object.entries(municipalities as Record<string, readonly string[]>).flatMap(([municipality, barangays]) => barangays.map((barangay) => ({ region, province, municipality, barangay })))));
-  const provinces = Array.from(new Set(locationRecords.filter((location) => !filters.region || location.region === filters.region).map((location) => location.province)));
-  const municipalities = Array.from(new Set(locationRecords.filter((location) => (!filters.region || location.region === filters.region) && (!filters.province || location.province === filters.province)).map((location) => location.municipality)));
-  const barangays = Array.from(new Set(locationRecords.filter((location) => (!filters.region || location.region === filters.region) && (!filters.province || location.province === filters.province) && (!filters.municipality || location.municipality === filters.municipality)).map((location) => location.barangay)));
-  const active = filters.search || filters.status || filters.contractor || filters.region || filters.province || filters.municipality || filters.barangay;
+function DateRangeFilter({ from, to, minDate, maxDate, onChange, ariaLabel }: { from: string; to: string; minDate: string; maxDate: string; onChange: (range: { from: string; to: string }) => void; ariaLabel: string }) {
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState({ top: 0, left: 0 });
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  useEscape(() => setOpen(false), open);
+
+  const minTs = minDate ? new Date(minDate).getTime() : 0;
+  const maxTs = maxDate ? new Date(maxDate).getTime() : minTs;
+  const tsRange = maxTs - minTs || 1;
+  const fromTs = from ? new Date(from).getTime() : minTs;
+  const toTs = to ? new Date(to).getTime() : maxTs;
+  const fromPct = Math.round(((fromTs - minTs) / tsRange) * 100);
+  const toPct = Math.round(((toTs - minTs) / tsRange) * 100);
+  function tsToDate(ts: number) { return new Date(ts).toISOString().split("T")[0]; }
+
+  useEffect(() => {
+    if (!open) return;
+    function onDown(e: MouseEvent) { if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) setOpen(false); }
+    function closePicker() { setOpen(false); }
+    document.addEventListener("mousedown", onDown);
+    window.addEventListener("resize", closePicker);
+    window.addEventListener("scroll", closePicker, true);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      window.removeEventListener("resize", closePicker);
+      window.removeEventListener("scroll", closePicker, true);
+    };
+  }, [open]);
+
+  function togglePicker() {
+    if (!open && triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      setPosition({ top: rect.bottom + 6, left: Math.max(12, Math.min(rect.left, window.innerWidth - 312)) });
+    }
+    setOpen(!open);
+  }
+
+  return <div className="drp-wrap" ref={pickerRef}>
+    <button type="button" className="drp-trigger" ref={triggerRef} aria-expanded={open} aria-label={ariaLabel} onClick={togglePicker}>
+      <CalendarRange size={15} />
+      <span>{from || minDate || "Start"}</span>
+      <span className="drp-sep">–</span>
+      <span>{to || maxDate || "End"}</span>
+    </button>
+    {open && <div className="drp-panel" role="dialog" aria-label="Date range picker" style={position}>
+      <div className="drp-heading">Time Range</div>
+      <div className="drp-field">
+        <div className="drp-label-row"><span className="drp-label from">From</span><input type="date" className="drp-date-input" aria-label="From date" value={from} min={minDate} max={to || maxDate} disabled={!minDate || !maxDate} onChange={(e) => onChange({ from: e.target.value, to })} /></div>
+        <input type="range" className="drp-slider drp-slider-from" aria-label="From date slider" min={0} max={100} value={fromPct} disabled={!minDate || !maxDate} style={{ "--drp-pct": `${fromPct}%` } as React.CSSProperties} onChange={(e) => { const date = tsToDate(minTs + (Number(e.target.value) / 100) * tsRange); if (!to || date <= to) onChange({ from: date, to }); }} />
+      </div>
+      <div className="drp-field">
+        <div className="drp-label-row"><span className="drp-label to">To</span><input type="date" className="drp-date-input" aria-label="To date" value={to} min={from || minDate} max={maxDate} disabled={!minDate || !maxDate} onChange={(e) => onChange({ from, to: e.target.value })} /></div>
+        <input type="range" className="drp-slider drp-slider-to" aria-label="To date slider" min={0} max={100} value={toPct} disabled={!minDate || !maxDate} style={{ "--drp-pct": `${toPct}%` } as React.CSSProperties} onChange={(e) => { const date = tsToDate(minTs + (Number(e.target.value) / 100) * tsRange); if (!from || date >= from) onChange({ from, to: date }); }} />
+      </div>
+    </div>}
+  </div>;
+}
+
+function FilterBar({ records, refs, filters, setFilters }: { records: Installation[]; refs: ReferenceData; filters: Filter; setFilters: (f: Filter) => void }) {
+  const installDates = records.map((record) => record.installDate).filter(Boolean);
+  const minDate = installDates.length ? installDates.reduce((a, b) => (a < b ? a : b)) : "";
+  const maxDate = installDates.length ? installDates.reduce((a, b) => (a > b ? a : b)) : "";
+  const uniqueLocations = <T extends { code: string }>(items: T[]) => Array.from(new Map(items.map((item) => [item.code, item])).values());
+  const availableIslandGroups = Array.from(new Set(records.map((record) => record.islandGroup).filter(Boolean)));
+  const regions = uniqueLocations(records.filter((record) => !filters.islandGroup || record.islandGroup === filters.islandGroup).map((record) => ({ code: record.regionCode, name: record.region })));
+  const provinces = uniqueLocations(records.filter((record) => (!filters.islandGroup || record.islandGroup === filters.islandGroup) && (!filters.regionCode || record.regionCode === filters.regionCode)).map((record) => ({ code: record.provinceCode, name: record.province })));
+  const municipalities = uniqueLocations(records.filter((record) => (!filters.islandGroup || record.islandGroup === filters.islandGroup) && (!filters.regionCode || record.regionCode === filters.regionCode) && (!filters.provinceCode || record.provinceCode === filters.provinceCode)).map((record) => ({ code: record.municipalityCode, name: record.municipality })));
+  const barangays = uniqueLocations(records.filter((record) => (!filters.islandGroup || record.islandGroup === filters.islandGroup) && (!filters.regionCode || record.regionCode === filters.regionCode) && (!filters.provinceCode || record.provinceCode === filters.provinceCode) && (!filters.municipalityCode || record.municipalityCode === filters.municipalityCode)).map((record) => ({ code: record.barangayCode, name: record.barangay })));
+  const active = filters.search || filters.status || filters.contractor || filters.islandGroup || filters.regionCode || filters.provinceCode || filters.municipalityCode || filters.barangayCode || filters.from || filters.to;
   return <div className="filter-stack">
     <div className="toolbar filter-row">
       <div className="input-wrap"><Search className="input-icon" size={17} /><input className="field search" aria-label="Search sites" value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} placeholder="Search site, installation ID, or location" /></div>
       <select className="select" aria-label="Filter sites by contractor" value={filters.contractor} onChange={(e) => setFilters({ ...filters, contractor: e.target.value })}><option value="">All contractors</option>{refs.contractors.map((c) => <option key={c.id}>{c.name}</option>)}</select>
-      <select className="select" aria-label="Filter sites by region" value={filters.region} onChange={(e) => setFilters({ ...filters, region: e.target.value, province: "", municipality: "", barangay: "" })}><option value="">All regions</option>{Object.keys(locations).map((r) => <option key={r}>{r}</option>)}</select>
-      <select className="select" aria-label="Filter sites by province" value={filters.province} onChange={(e) => setFilters({ ...filters, province: e.target.value, municipality: "", barangay: "" })}><option value="">All provinces</option>{provinces.map((province) => <option key={province}>{province}</option>)}</select>
-      <select className="select" aria-label="Filter sites by city or municipality" value={filters.municipality} onChange={(e) => setFilters({ ...filters, municipality: e.target.value, barangay: "" })}><option value="">All cities</option>{municipalities.map((municipality) => <option key={municipality}>{municipality}</option>)}</select>
-      <select className="select" aria-label="Filter sites by barangay" value={filters.barangay} onChange={(e) => setFilters({ ...filters, barangay: e.target.value })}><option value="">All barangays</option>{barangays.map((barangay) => <option key={barangay}>{barangay}</option>)}</select>
+      <select className="select" aria-label="Filter sites by island group" value={filters.islandGroup} onChange={(e) => setFilters({ ...filters, islandGroup: e.target.value, regionCode: "", provinceCode: "", municipalityCode: "", barangayCode: "" })}><option value="">All island groups</option>{availableIslandGroups.map((group) => <option key={group}>{group}</option>)}</select>
+      <select className="select" aria-label="Filter sites by region" value={filters.regionCode} onChange={(e) => setFilters({ ...filters, regionCode: e.target.value, provinceCode: "", municipalityCode: "", barangayCode: "" })}><option value="">All regions</option>{regions.map((region) => <option value={region.code} key={region.code}>{region.name}</option>)}</select>
+      <select className="select" aria-label="Filter sites by province" value={filters.provinceCode} onChange={(e) => setFilters({ ...filters, provinceCode: e.target.value, municipalityCode: "", barangayCode: "" })} disabled={!filters.regionCode}><option value="">All provinces</option>{provinces.map((province) => <option value={province.code} key={province.code}>{province.name}</option>)}</select>
+      <select className="select" aria-label="Filter sites by locality" value={filters.municipalityCode} onChange={(e) => setFilters({ ...filters, municipalityCode: e.target.value, barangayCode: "" })} disabled={!filters.provinceCode}><option value="">All localities</option>{municipalities.map((municipality) => <option value={municipality.code} key={municipality.code}>{municipality.name}</option>)}</select>
+      <select className="select" aria-label="Filter sites by barangay" value={filters.barangayCode} onChange={(e) => setFilters({ ...filters, barangayCode: e.target.value })} disabled={!filters.municipalityCode}><option value="">All barangays</option>{barangays.map((barangay) => <option value={barangay.code} key={barangay.code}>{barangay.name}</option>)}</select>
       {active && <button className="button ghost" onClick={() => setFilters(emptyFilter)}><X size={16} />Clear</button>}
     </div>
     <div className="status-filter-row" role="group" aria-label="Filter sites by status">
-      <button type="button" className={`button status-filter-pill ${!filters.status ? "active" : ""}`} aria-pressed={!filters.status} onClick={() => setFilters({ ...filters, status: "" })}>All sites</button>
-      {(Object.keys(statusMeta) as Status[]).map((status) => <button type="button" className={`button status-filter-pill ${status} ${filters.status === status ? "active" : ""}`} aria-pressed={filters.status === status} key={status} onClick={() => setFilters({ ...filters, status })}><span className="status-dot" style={{ background: statusMeta[status].color }} />{statusMeta[status].label}</button>)}
+      <div className="status-filter-pills">
+        <button type="button" className={`button status-filter-pill ${!filters.status ? "active" : ""}`} aria-pressed={!filters.status} onClick={() => setFilters({ ...filters, status: "" })}>All sites</button>
+        {(Object.keys(statusMeta) as Status[]).map((status) => <button type="button" className={`button status-filter-pill ${status} ${filters.status === status ? "active" : ""}`} aria-pressed={filters.status === status} key={status} onClick={() => setFilters({ ...filters, status })}><span className="status-dot" style={{ background: statusMeta[status].color }} />{statusMeta[status].label}</button>)}
+      </div>
+      <DateRangeFilter from={filters.from} to={filters.to} minDate={minDate} maxDate={maxDate} onChange={(range) => setFilters({ ...filters, ...range })} ariaLabel="Filter sites by installation date" />
     </div>
   </div>;
 }
@@ -203,7 +275,7 @@ function Dashboard({ records, allRecords, refs, filters, setFilters, setPage }: 
   return <>
     <div className="page-head"><div><p className="eyebrow">Overview</p><h1>Site dashboard</h1><p className="muted">Track site activity and review records that need follow-up.</p></div><button className="button primary" onClick={() => setPage("new")}><Plus size={16} />Add site</button></div>
     <div className="stats">{counts.map(({ status, count }) => <div className="stat" key={status}><div className="small muted">{statusMeta[status].label}</div><div className="stat-value">{count}<span className="status-dot" style={{ background: statusMeta[status].color }} /></div></div>)}</div>
-    <div style={{ marginBottom: 16 }}><FilterBar refs={refs} filters={filters} setFilters={setFilters} /></div>
+    <div style={{ marginBottom: 16 }}><FilterBar records={allRecords} refs={refs} filters={filters} setFilters={setFilters} /></div>
     <div className="two-pane">
       <div className="panel"><div className="panel-head"><div><h2>Recent sites</h2><div className="small muted">{records.length} matching records</div></div><button className="button ghost" onClick={() => setPage("installations")}>View all sites</button></div><RecordsTable records={records.slice(0, 6)} /></div>
       <div className="panel"><div className="panel-head"><div><h2>By contractor</h2><div className="small muted">Current filtered distribution</div></div><BarChart3 size={18} className="muted" /></div><div className="section">{contractors.map((c) => <div className="bar-row" key={c.name}><span className="small" title={c.name}>{c.name.split(" ")[0]}</span><span className="bar"><span style={{ width: `${(c.count/max)*100}%` }} /></span><strong>{c.count}</strong></div>)}</div></div>
@@ -214,10 +286,10 @@ function Dashboard({ records, allRecords, refs, filters, setFilters, setPage }: 
   </>;
 }
 
-function Installations({ records, refs, filters, setFilters, startEdit, setPage }: { records: Installation[]; refs: ReferenceData; filters: Filter; setFilters: (f: Filter) => void; startEdit: (r: Installation) => void; setPage: (p: Page) => void }) {
+function Installations({ records, allRecords, refs, filters, setFilters, startEdit, setPage }: { records: Installation[]; allRecords: Installation[]; refs: ReferenceData; filters: Filter; setFilters: (f: Filter) => void; startEdit: (r: Installation) => void; setPage: (p: Page) => void }) {
   return <>
     <div className="page-head"><div><p className="eyebrow">Registry</p><h1>Sites</h1><p className="muted">Find a site record and review its deployed equipment.</p></div><div className="toolbar"><button className="button" onClick={() => downloadCsv(records, refs)}><Download size={16} />Export CSV</button><button className="button" onClick={() => downloadXlsx(records, refs)}><FileSpreadsheet size={16} />Export XLSX</button><button className="button primary" onClick={() => setPage("new")}><Plus size={16} />Add site</button></div></div>
-    <div style={{ marginBottom: 16 }}><FilterBar refs={refs} filters={filters} setFilters={setFilters} /></div>
+    <div style={{ marginBottom: 16 }}><FilterBar records={allRecords} refs={refs} filters={filters} setFilters={setFilters} /></div>
     <div className="panel"><div className="panel-head"><strong>{records.length} records</strong><span className="small muted">Showing 1-{Math.min(records.length, 20)} of {records.length}</span></div><RecordsTable records={records} onSelect={startEdit} /><div className="pagination"><span className="small muted">20 rows per page</span><div className="toolbar"><button className="button icon-button" aria-label="Previous page" disabled><ChevronLeft size={16} /></button><button className="button icon-button" aria-label="Next page" disabled><ChevronRight size={16} /></button></div></div></div>
   </>;
 }
@@ -234,79 +306,30 @@ function ServiceVisitsPage({ records, refs, onSave }: { records: Installation[];
   const [filters, setFilters] = useState({ search: "", status: "", type: "", contractor: "", from: minDate, to: maxDate });
   const [editing, setEditing] = useState<{ installation: Installation; visit?: ServiceVisit }>();
   const [newInstallationId, setNewInstallationId] = useState(records[0]?.id ?? "");
+  const [siteSearch, setSiteSearch] = useState("");
   const [chooseSite, setChooseSite] = useState(false);
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  const pickerRef = useRef<HTMLDivElement>(null);
-  useEscape(() => setChooseSite(false), chooseSite);
-
-  // Convert date strings to timestamps for slider math
-  const minTs = minDate ? new Date(minDate).getTime() : 0;
-  const maxTs = maxDate ? new Date(maxDate).getTime() : new Date().getTime();
-  const tsRange = maxTs - minTs || 1;
-  const fromTs = filters.from ? new Date(filters.from).getTime() : minTs;
-  const toTs = filters.to ? new Date(filters.to).getTime() : maxTs;
-  const fromPct = Math.round(((fromTs - minTs) / tsRange) * 100);
-  const toPct = Math.round(((toTs - minTs) / tsRange) * 100);
-  function tsToDate(ts: number) { return new Date(ts).toISOString().split("T")[0]; }
-
-  useEffect(() => {
-    if (!showDatePicker) return;
-    function onDown(e: MouseEvent) { if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) setShowDatePicker(false); }
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [showDatePicker]);
+  useEscape(() => { setChooseSite(false); setSiteSearch(""); }, chooseSite);
 
   const visits = records.flatMap((installation) => installation.serviceVisits.map((visit) => ({ installation, visit }))).filter(({ installation, visit }) =>
     (!filters.search || `${installation.siteName} ${installation.id} ${visit.ticketReference}`.toLowerCase().includes(filters.search.toLowerCase())) &&
     (!filters.status || visit.status === filters.status) && (!filters.type || visit.type === filters.type) && (!filters.contractor || visit.contractor === filters.contractor) &&
     (!filters.from || visit.scheduledDate >= filters.from) && (!filters.to || visit.scheduledDate <= filters.to)
   ).sort((a, b) => b.visit.scheduledDate.localeCompare(a.visit.scheduledDate));
+  const matchingSites = records.filter((record) => !siteSearch || `${record.siteName} ${record.id} ${record.barangay} ${record.municipality} ${record.province} ${record.contractor}`.toLowerCase().includes(siteSearch.toLowerCase()));
   const counts = (Object.keys(serviceStatusLabels) as ServiceVisitStatus[]).map((status) => ({ status, count: visits.filter(({ visit }) => visit.status === status).length }));
   return <>
-    <div className="page-head"><div><p className="eyebrow">Field support</p><h1>Service visits</h1><p className="muted">Track contractor maintenance, inspections, repairs, and equipment replacements.</p></div><button className="button primary" onClick={() => setChooseSite(true)}><Plus size={16} />New service visit</button></div>
+    <div className="page-head"><div><p className="eyebrow">Field support</p><h1>Service visits</h1><p className="muted">Track contractor maintenance, inspections, repairs, and equipment replacements.</p></div><button className="button primary" onClick={() => { setSiteSearch(""); setChooseSite(true); }}><Plus size={16} />New service visit</button></div>
     <div className="stats">{counts.map(({ status, count }) => <div className="stat" key={status}><div className="small muted">{serviceStatusLabels[status]}</div><div className="stat-value">{count}<Wrench size={17} className="muted" /></div></div>)}</div>
     <div className="panel"><div className="section"><div className="toolbar filter-row">
       <input className="field search" aria-label="Search service visits" placeholder="Search site or ticket" value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} />
       <select className="select" aria-label="Filter service visits by status" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}><option value="">All statuses</option>{Object.entries(serviceStatusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
       <select className="select" aria-label="Filter service visits by type" value={filters.type} onChange={(e) => setFilters({ ...filters, type: e.target.value })}><option value="">All visit types</option>{refs.serviceVisitTypes.map((type) => <option key={type.id}>{type.name}</option>)}</select>
       <select className="select" aria-label="Filter service visits by contractor" value={filters.contractor} onChange={(e) => setFilters({ ...filters, contractor: e.target.value })}><option value="">All contractors</option>{refs.contractors.map((contractor) => <option key={contractor.id}>{contractor.name}</option>)}</select>
-      <div className="drp-wrap" ref={pickerRef}>
-        <button type="button" className="drp-trigger" aria-expanded={showDatePicker} aria-label="Open date range picker" onClick={() => setShowDatePicker(!showDatePicker)}>
-          <CalendarRange size={13} />
-          <span>{filters.from || minDate || "Start"}</span>
-          <span className="drp-sep">–</span>
-          <span>{filters.to || maxDate || "End"}</span>
-        </button>
-        {showDatePicker && (
-          <div className="drp-panel" role="dialog" aria-label="Date range picker">
-            <div className="drp-heading">Time Range</div>
-            <div className="drp-field">
-              <div className="drp-label-row">
-                <span className="drp-label from">From</span>
-                <input type="date" className="drp-date-input" aria-label="From date" value={filters.from} min={minDate} max={filters.to || maxDate}
-                  onChange={(e) => setFilters({ ...filters, from: e.target.value })} />
-              </div>
-              <input type="range" className="drp-slider drp-slider-from" aria-label="From date slider" min={0} max={100} value={fromPct}
-                style={{ "--drp-pct": `${fromPct}%` } as React.CSSProperties}
-                onChange={(e) => { const ts = minTs + (Number(e.target.value) / 100) * tsRange; const d = tsToDate(ts); if (!filters.to || d <= filters.to) setFilters({ ...filters, from: d }); }} />
-            </div>
-            <div className="drp-field">
-              <div className="drp-label-row">
-                <span className="drp-label to">To</span>
-                <input type="date" className="drp-date-input" aria-label="To date" value={filters.to} min={filters.from || minDate} max={maxDate}
-                  onChange={(e) => setFilters({ ...filters, to: e.target.value })} />
-              </div>
-              <input type="range" className="drp-slider drp-slider-to" aria-label="To date slider" min={0} max={100} value={toPct}
-                style={{ "--drp-pct": `${toPct}%` } as React.CSSProperties}
-                onChange={(e) => { const ts = minTs + (Number(e.target.value) / 100) * tsRange; const d = tsToDate(ts); if (!filters.from || d >= filters.from) setFilters({ ...filters, to: d }); }} />
-            </div>
-          </div>
-        )}
-      </div>
+      <DateRangeFilter from={filters.from} to={filters.to} minDate={minDate} maxDate={maxDate} onChange={(range) => setFilters({ ...filters, ...range })} ariaLabel="Filter service visits by scheduled date" />
     </div></div>
       <ServiceVisitTable visits={visits} onSelect={(installation, visit) => setEditing({ installation, visit })} />
     </div>
-    {chooseSite && <div className="modal-backdrop" role="presentation"><div className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="choose-visit-site"><div className="modal-header"><div><h2 id="choose-visit-site">Choose a site</h2><p className="muted">Select the site receiving contractor support.</p></div><button type="button" className="button icon-button ghost" aria-label="Close site chooser" onClick={() => setChooseSite(false)}><X size={17} /></button></div><label>Site<select autoFocus className="select" value={newInstallationId} onChange={(e) => setNewInstallationId(e.target.value)}>{records.map((record) => <option value={record.id} key={record.id}>{record.siteName || record.id}</option>)}</select></label><div className="modal-actions"><button type="button" className="button" onClick={() => setChooseSite(false)}>Cancel</button><button type="button" className="button primary" onClick={() => { const installation = records.find((record) => record.id === newInstallationId); if (installation) { setChooseSite(false); setEditing({ installation }); } }}><Plus size={15} />Continue</button></div></div></div>}
+    {chooseSite && <div className="modal-backdrop" role="presentation"><div className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="choose-visit-site"><div className="modal-header"><div><h2 id="choose-visit-site">Choose a site</h2><p className="muted">Search for the site receiving contractor support.</p></div><button type="button" className="button icon-button ghost" aria-label="Close site chooser" onClick={() => { setChooseSite(false); setSiteSearch(""); }}><X size={17} /></button></div><label>Search sites<div className="input-wrap"><Search className="input-icon" size={16} /><input autoFocus className="field search" value={siteSearch} onChange={(e) => setSiteSearch(e.target.value)} placeholder="Site name, ID, location, or contractor" /></div></label><div className="site-search-results" style={{ display: "grid", gap: 4, maxHeight: 244, marginTop: 10, padding: 4, overflowY: "auto", border: "1px solid var(--line)", borderRadius: 8, background: "var(--surface-muted)" }} role="listbox" aria-label="Matching sites">{matchingSites.length ? matchingSites.map((record) => { const selected = record.id === newInstallationId; return <button type="button" className={`button site-search-result ${selected ? "selected" : ""}`} style={{ display: "grid", justifyContent: "stretch", gap: 3, width: "100%", minHeight: 0, padding: "9px 10px", borderColor: selected ? "oklch(0.76 0.06 164)" : "transparent", background: selected ? "var(--accent-soft)" : "transparent", textAlign: "left" }} role="option" aria-selected={selected} key={record.id} onClick={() => setNewInstallationId(record.id)}><strong>{record.siteName || "Site name required"}</strong><span>{record.id} | {record.barangay}, {record.municipality}</span></button>; }) : <div className="site-search-empty">No sites match your search.</div>}</div><div className="modal-actions"><button type="button" className="button" onClick={() => { setChooseSite(false); setSiteSearch(""); }}>Cancel</button><button type="button" className="button primary" disabled={!matchingSites.some((record) => record.id === newInstallationId)} onClick={() => { const installation = records.find((record) => record.id === newInstallationId); if (installation) { setChooseSite(false); setSiteSearch(""); setEditing({ installation }); } }}><Plus size={15} />Continue</button></div></div></div>}
     {editing && <ServiceVisitModal refs={refs} installation={editing.installation} visit={editing.visit} onClose={() => setEditing(undefined)} onSave={(visit, components) => { onSave(editing.installation.id, visit, components); setEditing(undefined); }} />}
   </>;
 }
@@ -370,7 +393,7 @@ function InstallationForm({
   clearNavAttempt: () => void;
 }) {
   const createdAt = new Date().toISOString();
-  const [record, setRecord] = useState<Installation>(initial ?? { id: uid("INS"), siteName: "", unitType: refs.unitTypes.find((x) => x.active)?.name ?? "", contractor: refs.contractors.find((x) => x.active)?.name ?? "", installDate: today(), status: "scheduled", region: "", province: "", municipality: "", barangay: "", address: "", remarks: "", components: [], customValues: {}, photos: [], createdBy: currentUser, createdAt, updatedBy: currentUser, updatedAt: createdAt, serviceVisits: [], auditEvents: [] });
+  const [record, setRecord] = useState<Installation>(initial ?? { id: uid("INS"), siteName: "", unitType: refs.unitTypes.find((x) => x.active)?.name ?? "", contractor: refs.contractors.find((x) => x.active)?.name ?? "", installDate: today(), status: "scheduled", islandGroup: "", region: "", regionCode: "", province: "", provinceCode: "", municipality: "", municipalityCode: "", barangay: "", barangayCode: "", address: "", remarks: "", components: [], customValues: {}, photos: [], createdBy: currentUser, createdAt, updatedBy: currentUser, updatedAt: createdAt, serviceVisits: [], auditEvents: [] });
   const [tab, setTab] = useState<"overview" | "visits" | "audit">("overview");
   const [visitOpen, setVisitOpen] = useState<ServiceVisit | null>();
   const [showRemoved, setShowRemoved] = useState(false);
@@ -391,9 +414,10 @@ function InstallationForm({
   const shouldShowExitModal = showExitModal || Boolean(navAttempt);
 
   const duplicate = record.siteName && records.some((r) => r.siteName.toLowerCase() === record.siteName.toLowerCase() && r.id !== record.id);
-  const provinces = record.region ? Object.keys(locations[record.region as keyof typeof locations] ?? {}) : [];
-  const municipalities = record.region && record.province ? Object.keys((locations[record.region as keyof typeof locations] as Record<string, Record<string, readonly string[]>>)?.[record.province] ?? {}) : [];
-  const barangays = record.region && record.province && record.municipality ? ((locations[record.region as keyof typeof locations] as Record<string, Record<string, readonly string[]>>)?.[record.province]?.[record.municipality] ?? []) : [];
+  const regions = listRegions(record.islandGroup);
+  const provinces = listProvinces(record.regionCode);
+  const municipalities = listMuncities(record.provinceCode);
+  const barangays = listBarangays(record.municipalityCode);
   const patch = (data: Partial<Installation>) => setRecord((r) => ({ ...r, ...data }));
   const activeFields = (refs.customFields ?? []).filter((field) => field.active || Boolean((record.customValues ?? {})[field.id])).sort((a, b) => a.order - b.order);
   const activeComponents = record.components.filter((component) => !component.removedAt);
@@ -442,10 +466,11 @@ function InstallationForm({
         <label>Status<select className="select" value={record.status} onChange={(e) => patch({ status: e.target.value as Status })}>{Object.keys(statusMeta).map((x) => <option key={x}>{x}</option>)}</select></label>
       </div>{duplicate && <div className="notice validation-notice inline" role="alert"><strong>This site name already exists.</strong> Enter a unique site name before saving.</div>}{record.legacyKitNumber && <div className="notice inline legacy-kit-prompt"><span className="small migration-label">Migration follow-up</span><strong>Assign old kit number: {record.legacyKitNumber}</strong><div className="small">Add the correct equipment, enter this value in its kit-number field, then mark this follow-up as assigned.</div><button type="button" className="button" onClick={() => patch({ legacyKitNumber: undefined })}>Mark kit number assigned</button></div>}</section>
       <section className="section"><div className="section-title"><h2>Site location</h2><span className="small muted">PSGC-aligned fields</span></div><div className="grid-4">
-        <label>Region<select required className="select" value={record.region} onChange={(e) => patch({ region: e.target.value, province: "", municipality: "", barangay: "" })}><option value="">Select region</option>{Object.keys(locations).map((x) => <option key={x}>{x}</option>)}</select></label>
-        <label>Province<select required className="select" value={record.province} onChange={(e) => patch({ province: e.target.value, municipality: "", barangay: "" })}><option value="">Select province</option>{provinces.map((x) => <option key={x}>{x}</option>)}</select></label>
-        <label>City or municipality<select required className="select" value={record.municipality} onChange={(e) => patch({ municipality: e.target.value, barangay: "" })}><option value="">Select city</option>{municipalities.map((x) => <option key={x}>{x}</option>)}</select></label>
-        <label>Barangay<select required className="select" value={record.barangay} onChange={(e) => patch({ barangay: e.target.value })}><option value="">Select barangay</option>{barangays.map((x) => <option key={x}>{x}</option>)}</select></label>
+        <label>Island group<select required className="select" value={record.islandGroup} onChange={(e) => patch({ islandGroup: e.target.value as Installation["islandGroup"], region: "", regionCode: "", province: "", provinceCode: "", municipality: "", municipalityCode: "", barangay: "", barangayCode: "" })}><option value="">Select island group</option>{islandGroups.map((group) => <option key={group}>{group}</option>)}</select></label>
+        <label>Region<select required className="select" value={record.regionCode} onChange={(e) => { const selected = regions.find((item) => item.psgcCode === e.target.value); patch({ region: selected?.regionName ?? "", regionCode: selected?.psgcCode ?? "", province: "", provinceCode: "", municipality: "", municipalityCode: "", barangay: "", barangayCode: "" }); }}><option value="">Select region</option>{regions.map((item) => <option value={item.psgcCode} key={item.psgcCode}>{item.regionName}</option>)}</select></label>
+        <label>Province<select required className="select" value={record.provinceCode} disabled={!record.regionCode} onChange={(e) => { const selected = provinces.find((item) => item.psgcCode === e.target.value); patch({ province: selected?.provName ?? "", provinceCode: selected?.psgcCode ?? "", municipality: "", municipalityCode: "", barangay: "", barangayCode: "" }); }}><option value="">Select province</option>{provinces.map((item) => <option value={item.psgcCode} key={item.psgcCode}>{item.provName}</option>)}</select></label>
+        <label>Locality<select required className="select" value={record.municipalityCode} disabled={!record.provinceCode} onChange={(e) => { const selected = municipalities.find((item) => item.psgcCode === e.target.value); patch({ municipality: selected?.munCityName ?? "", municipalityCode: selected?.psgcCode ?? "", barangay: "", barangayCode: "" }); }}><option value="">Select locality</option>{municipalities.map((item) => <option value={item.psgcCode} key={item.psgcCode}>{item.munCityName}</option>)}</select></label>
+        <label>Barangay<select required className="select" value={record.barangayCode} disabled={!record.municipalityCode} onChange={(e) => { const selected = barangays.find((item) => item.psgcCode === e.target.value); patch({ barangay: selected?.brgyName ?? "", barangayCode: selected?.psgcCode ?? "" }); }}><option value="">Select barangay</option>{barangays.map((item) => <option value={item.psgcCode} key={item.psgcCode}>{item.brgyName}</option>)}</select></label>
       </div><label className="field-block">Site address or landmark<input className="field" value={record.address} onChange={(e) => patch({ address: e.target.value })} placeholder="Optional street, purok, or landmark" /></label></section>
       {activeFields.length > 0 && <section className="section"><div className="section-title"><div><h2>Additional information</h2><span className="small muted">Configured by your workplace administrator.</span></div></div><div className="grid-3">{activeFields.map((field) => <CustomFieldInput field={field} value={(record.customValues ?? {})[field.id] ?? ""} onChange={(value) => patch({ customValues: { ...(record.customValues ?? {}), [field.id]: value } })} key={field.id} />)}</div></section>}
       <section className="section"><div className="section-title"><div><h2>Equipment</h2><span className="small muted">Record the identifiers shown for each equipment type.</span></div><div className="toolbar">{record.components.some((component) => component.removedAt) && <button type="button" className="button" aria-expanded={showRemoved} onClick={() => setShowRemoved(!showRemoved)}>{showRemoved ? "Hide" : "Show"} removed equipment</button>}<button type="button" className="button" onClick={addComponent}><Plus size={15} />Add equipment</button></div></div>
@@ -512,7 +537,8 @@ function ImportRecords({ refs, records, notify }: { refs: ReferenceData; records
     const wb = new ExcelJS.Workbook();
     const customFields = (refs.customFields ?? []).filter((field) => field.active).sort((a, b) => a.order - b.order);
     const componentLabels = Array.from(new Set(refs.componentTypes.flatMap((type) => (type.fields ?? []).filter((field) => field.active).map((field) => libraryField(refs, field)?.label).filter(Boolean) as string[])));
-    wb.addWorksheet("Installations").addRows([["External Ref", "Site Name", "Unit Type", "Contractor", "Install Date", "Status", "Region", "Province", "City/Municipality", "Barangay", "Address", "Remarks", ...customFields.map((field) => field.label)], ["ROW-001", "Cebu Hub 01", "Satellite broadband", refs.contractors.find((x) => x.active)?.name ?? "", today(), "installed", "Region VII", "Cebu", "Cebu City", "Lahug", "", "", ...customFields.map(() => "")]]);
+    const sample = demoInstallations[0];
+    wb.addWorksheet("Installations").addRows([["External Ref", "Site Name", "Unit Type", "Contractor", "Install Date", "Status", "Island Group", "Region", "Region Code", "Province", "Province Code", "Locality", "Locality Code", "Barangay", "Barangay Code", "Address", "Remarks", ...customFields.map((field) => field.label)], ["ROW-001", "Cebu Hub 01", "Satellite broadband", refs.contractors.find((x) => x.active)?.name ?? "", today(), "installed", sample.islandGroup, sample.region, sample.regionCode, sample.province, sample.provinceCode, sample.municipality, sample.municipalityCode, sample.barangay, sample.barangayCode, "", "", ...customFields.map(() => "")]]);
     wb.addWorksheet("Components").addRows([["Installation Ref", "Component Type", "Notes", ...componentLabels], ["ROW-001", "Modem", "", ...componentLabels.map((label) => label === "Serial number" ? "MDM-00001" : label === "MAC address" ? "A4:5E:60:11:28:9C" : "")]]);
     wb.addWorksheet("Instructions").addRows([
       ["FieldTrack site import guide"],
@@ -521,7 +547,8 @@ function ImportRecords({ refs, records, notify }: { refs: ReferenceData; records
       ["3. Add deployed equipment on the Components sheet. Enter the matching External Ref under Installation Ref."],
       ["4. Fill in the equipment fields that apply to the selected Component Type. Required fields are configured by your admin."],
       ["5. Enter MAC addresses as AA:BB:CC:DD:EE:FF, AA-BB-CC-DD-EE-FF, or 12 hexadecimal characters."],
-      ["6. Upload the completed workbook in FieldTrack. Review any rows marked Needs attention before saving."],
+      ["6. Keep the PSGC code columns for reliable location matching. If codes are omitted, provide the complete Island Group, Region, Province, Locality, and Barangay path."],
+      ["7. Upload the completed workbook in FieldTrack. Review any rows marked Needs attention before saving."],
       [],
       ["Allowed site statuses", "scheduled, installed, issue, cancelled"],
       [],
@@ -539,9 +566,10 @@ function ImportRecords({ refs, records, notify }: { refs: ReferenceData; records
     sheet.eachRow((row, rowNumber) => { if (rowNumber > 1) { const values = (row.values as string[]).slice(1); data.push(Object.fromEntries(headers.map((header, i) => [header, String(values[i] ?? "")]))); } });
     const installationRows = data.map((r, i) => {
       const siteName = String(r["Site Name"] ?? ""); const contractor = String(r.Contractor ?? ""); const status = String(r.Status ?? "").toLowerCase();
+      const location = resolveLocation({ islandGroup: r["Island Group"], region: r.Region, regionCode: r["Region Code"], province: r.Province, provinceCode: r["Province Code"], municipality: r.Locality || r["City/Municipality"], municipalityCode: r["Locality Code"], barangay: r.Barangay, barangayCode: r["Barangay Code"] });
       const customIssue = (refs.customFields ?? []).filter((field) => field.active).map((field) => field.required && !r[field.label] ? `Missing ${field.label}` : field.type === "dropdown" && r[field.label] && !field.options.some((option) => option.active && option.name === r[field.label]) ? `Invalid ${field.label}` : "").find(Boolean);
-      const issue = !siteName ? "Missing site name" : !refs.contractors.some((option) => option.active && option.name === contractor) ? "Unknown contractor" : !Object.keys(statusMeta).includes(status) ? "Invalid status" : customIssue ?? "";
-      return { row: i + 2, kind: "Site" as const, subject: siteName, details: contractor, reference: `${r.Barangay ?? ""}, ${r["City/Municipality"] ?? ""}`, valid: !issue, issue };
+      const issue = !siteName ? "Missing site name" : !refs.contractors.some((option) => option.active && option.name === contractor) ? "Unknown contractor" : !Object.keys(statusMeta).includes(status) ? "Invalid status" : location.issue || customIssue || "";
+      return { row: i + 2, kind: "Site" as const, subject: siteName, details: contractor, reference: location.location ? `${location.location.barangay}, ${location.location.municipality}` : `${r.Barangay ?? ""}, ${r.Locality || r["City/Municipality"] || ""}`, valid: !issue, issue };
     });
     const componentSheet = wb.getWorksheet("Components"); const componentRows: ImportRow[] = [];
     if (componentSheet) { const componentHeaders = (componentSheet.getRow(1).values as string[]).slice(1).map(String); const importedMacs = new Set<string>(); componentSheet.eachRow((row, rowNumber) => { if (rowNumber > 1) { const values = (row.values as string[]).slice(1); const item = Object.fromEntries(componentHeaders.map((header, i) => [header, String(values[i] ?? "")])); const template = componentType(refs, item["Component Type"]); const missing = template?.fields.find((field) => { const reusable = libraryField(refs, field); return field.active && field.required && reusable && !item[reusable.label]; }); const macField = template?.fields.find((field) => { const reusable = libraryField(refs, field); return field.active && reusable?.type === "mac" && item[reusable.label]; }); const missingReusable = missing ? libraryField(refs, missing) : undefined; const macReusable = macField ? libraryField(refs, macField) : undefined; const mac = macReusable ? item[macReusable.label] : ""; const normalized = normalizeMac(mac); const duplicate = normalized && (importedMacs.has(normalized) || records.some((record) => record.components.some((component) => componentMacValues(refs, component).includes(normalized)))); if (normalized) importedMacs.add(normalized); const issue = !template ? "Unknown equipment type" : missingReusable ? `Missing ${missingReusable.label}` : mac && !normalized ? "Check the MAC address format" : duplicate ? "Duplicate MAC address, review required" : ""; componentRows.push({ row: rowNumber, kind: "Equipment", subject: item["Component Type"] || "Equipment type required", details: item["Notes"], reference: item["Installation Ref"], valid: !issue, issue }); } }); }
@@ -630,8 +658,8 @@ function ComponentTypeSettings({ componentType: type, equipmentFields, createEqu
 
 function installationRows(records: Installation[], refs: ReferenceData) {
   const fields = [...(refs.customFields ?? [])].sort((a, b) => a.order - b.order);
-  const header = ["Site Name", "Installation ID", "Unit Type", "Contractor", "Install Date", "Status", "Region", "Province", "City/Municipality", "Barangay", "Address", "Remarks", ...fields.map((field) => field.label)];
-  return [header, ...records.map((r) => [r.siteName, r.id, r.unitType, r.contractor, r.installDate, r.status, r.region, r.province, r.municipality, r.barangay, r.address, r.remarks, ...fields.map((field) => (r.customValues ?? {})[field.id] ?? "")])];
+  const header = ["Site Name", "Installation ID", "Unit Type", "Contractor", "Install Date", "Status", "Island Group", "Region", "Region Code", "Province", "Province Code", "Locality", "Locality Code", "Barangay", "Barangay Code", "Address", "Remarks", ...fields.map((field) => field.label)];
+  return [header, ...records.map((r) => [r.siteName, r.id, r.unitType, r.contractor, r.installDate, r.status, r.islandGroup, r.region, r.regionCode, r.province, r.provinceCode, r.municipality, r.municipalityCode, r.barangay, r.barangayCode, r.address, r.remarks, ...fields.map((field) => (r.customValues ?? {})[field.id] ?? "")])];
 }
 
 function downloadCsv(records: Installation[], refs: ReferenceData) {
@@ -647,8 +675,4 @@ async function downloadXlsx(records: Installation[], refs: ReferenceData) {
   wb.addWorksheet("Components").addRows([["Installation ID", "Component Type", "Notes", ...labels], ...records.flatMap((record) => record.components.map((component) => { const fields = componentType(refs, component.type)?.fields ?? []; return [record.id, component.type, component.notes, ...labels.map((label) => { const field = fields.find((item) => libraryField(refs, item)?.label === label); return field ? (component.values ?? {})[field.id] ?? "" : ""; })]; }))]);
   const buffer = await wb.xlsx.writeBuffer(); const link = document.createElement("a");
   link.href = URL.createObjectURL(new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })); link.download = `fieldtrack-export-${today()}.xlsx`; link.click();
-}
-
-function setChooseSite(arg0: boolean): void {
-  throw new Error("Function not implemented.");
 }

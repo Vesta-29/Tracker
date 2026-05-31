@@ -30,8 +30,8 @@ Open `http://localhost:3000` and sign in with the pre-filled demo credentials.
 
 1. Create a Supabase project.
 2. Run `supabase/migrations/202605300001_initial_schema.sql` in the SQL editor or through the Supabase CLI.
-3. Seed the full PSA PSGC location master list and your approved workplace reference values.
+3. Add `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` to `.env.local`, then run `npm run seed:psgc`.
 4. Copy `.env.example` to `.env.local` and add the Supabase project URL and anon key.
 5. Replace the local demo repository calls in `components/tracker-app.tsx` with Supabase queries or server actions.
 
-The browser demo intentionally uses a representative PSGC subset. Production should import the official PSA PSGC master list before launch.
+The app pins `@jobuntux/psgc@0.2.1` and uses its PSA 2025 Q2 dataset for the full location cascade. The seed command is idempotent and upserts the same location hierarchy parent-first.
