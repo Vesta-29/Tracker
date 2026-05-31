@@ -24,14 +24,18 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:3000` and sign in with the pre-filled demo credentials.
+Open `http://localhost:3000` and sign in after connecting a hosted Supabase project.
 
 ## Connect Supabase
 
-1. Create a Supabase project.
-2. Run `supabase/migrations/202605300001_initial_schema.sql` in the SQL editor or through the Supabase CLI.
-3. Add `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` to `.env.local`, then run `npm run seed:psgc`.
-4. Copy `.env.example` to `.env.local` and add the Supabase project URL and anon key.
-5. Replace the local demo repository calls in `components/tracker-app.tsx` with Supabase queries or server actions.
+1. Create a hosted Supabase project and disable public email signup in Authentication settings.
+2. Copy `.env.example` to `.env.local` and add the project base URL ending in `.supabase.co` without `/rest/v1`, anon key, service-role key, project ref, database password, and first administrator email.
+3. Run:
 
-The app pins `@jobuntux/psgc@0.2.1` and uses its PSA 2025 Q2 dataset for the full location cascade. The seed command is idempotent and upserts the same location hierarchy parent-first.
+```powershell
+.\scripts\setup-hosted.ps1
+```
+
+The setup runner links the project, applies every migration, seeds the PSGC hierarchy twice, seeds operational references twice, and invites the initial administrator. Repeated seeds are intentional idempotency checks.
+
+FieldTrack uses Supabase Auth, RLS, database audit triggers, signed photo URLs, and RPC-backed aggregate saves. The app pins `@jobuntux/psgc@0.2.1` and uses its PSA 2025 Q2 dataset for the location cascade.

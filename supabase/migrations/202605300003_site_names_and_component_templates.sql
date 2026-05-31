@@ -81,7 +81,7 @@ for each row execute function public.audit_configuration_change();
 
 -- Seed per-type Serial number fields and carry current fixed values into the flexible model.
 insert into public.component_field_definitions(component_type_id, label, field_type, required, display_order)
-select id, 'Serial number', 'text', false, 0 from public.component_types;
+select id, 'Serial number', 'text'::public.component_field_type, false, 0 from public.component_types;
 
 insert into public.installation_component_values(installation_component_id, field_definition_id, value)
 select component.id, field.id, component.serial_number
@@ -91,7 +91,7 @@ where component.serial_number is not null and component.serial_number <> '';
 
 -- Seed MAC address only for component types that already have MAC-bearing records.
 insert into public.component_field_definitions(component_type_id, label, field_type, required, display_order)
-select distinct component_type_id, 'MAC address', 'mac', false, 1
+select distinct component_type_id, 'MAC address', 'mac'::public.component_field_type, false, 1
 from public.installation_components where mac_address is not null
 on conflict(component_type_id, label) do nothing;
 

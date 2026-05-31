@@ -2,9 +2,10 @@ import rawBarangays from "@jobuntux/psgc/data/2025-2Q/barangays.json";
 import rawMuncities from "@jobuntux/psgc/data/2025-2Q/muncities.json";
 import rawProvinces from "@jobuntux/psgc/data/2025-2Q/provinces.json";
 import rawRegions from "@jobuntux/psgc/data/2025-2Q/regions.json";
+import { islandGroups } from "@/lib/location-groups";
 import type { IslandGroup } from "@/lib/types";
 
-export const islandGroups: IslandGroup[] = ["Luzon", "Visayas", "Mindanao"];
+export { islandGroups };
 
 const islandGroupByRegionCode: Record<string, IslandGroup> = {
   "01": "Luzon", "02": "Luzon", "03": "Luzon", "04": "Luzon", "05": "Luzon", "13": "Luzon", "14": "Luzon", "17": "Luzon",

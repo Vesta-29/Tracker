@@ -78,6 +78,7 @@ export type ServiceVisitComponentChange = {
 
 export type ServiceVisit = {
   id: string;
+  dbId?: string;
   type: string;
   status: ServiceVisitStatus;
   ticketReference: string;
@@ -95,6 +96,7 @@ export type ServiceVisit = {
 
 export type Installation = {
   id: string;
+  dbId?: string;
   siteName: string;
   legacyKitNumber?: string;
   unitType: string;
@@ -130,4 +132,12 @@ export type ReferenceData = {
   equipmentFields: EquipmentFieldLibraryItem[];
   customFields: CustomFieldDefinition[];
   serviceVisitTypes: ReferenceOption[];
+};
+
+export type Profile = {
+  id: string;
+  fullName: string;
+  email: string;
+  role: "admin" | "staff";
+  active: boolean;
 };

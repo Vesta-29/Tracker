@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "seed:psgc": "node scripts/seed-psgc.mjs",
+    "seed:psgc": "node --env-file-if-exists=.env.local scripts/seed-psgc.mjs",
+    "seed:references": "node --env-file-if-exists=.env.local scripts/seed-references.mjs",
+    "bootstrap:admin": "node --env-file-if-exists=.env.local scripts/bootstrap-admin.mjs",
     "check:psgc": "node scripts/check-psgc.mjs"
   },
   "dependencies": {
