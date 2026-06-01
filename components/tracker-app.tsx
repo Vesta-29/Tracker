@@ -8,7 +8,7 @@ import {
   Settings, Trash2, Upload, Users, X, ArrowUp, ArrowDown
 } from "lucide-react";
 import { islandGroups, getIslandGroup } from "@/lib/location-groups";
-import { changePassword, clearInvalidSession, consumeAuthCallback, createUser, deleteReferencePermanently, generateUserTemporaryPassword, listLocationOptions, listUsers, loadInstallations, loadReferences, loadWorkspace, persistReferences, requestPasswordReset, saveInstallation, saveInstallationBatch, saveVisit, setPassword, signIn, signOut, updateOwnProfile, updateUser } from "@/lib/supabase-repository";
+import { changePassword, clearInvalidSession, consumeAuthCallback, createUser, deleteReferencePermanently, generateUserTemporaryPassword, getCachedUsers, listLocationOptions, listUsers, loadInstallations, loadReferences, loadWorkspace, persistReferences, prefetchUsers, requestPasswordReset, saveInstallation, saveInstallationBatch, saveVisit, setPassword, signIn, signOut, updateOwnProfile, updateUser } from "@/lib/supabase-repository";
 import { supabaseConfigured } from "@/lib/supabase-browser";
 import type { LocationOption } from "@/lib/supabase-repository";
 import type { AuditEvent, Component, ComponentFieldAttachment, ComponentFieldType, ComponentTypeOption, CustomFieldDefinition, CustomFieldType, EquipmentFieldLibraryItem, Installation, Profile, ReferenceData, ReferenceOption, ServiceVisit, ServiceVisitStatus, Status } from "@/lib/types";
@@ -850,6 +850,7 @@ function SettingsPage({ refs, setRefs, records, profile, referenceSaveState, ref
   const [renamingReference, setRenamingReference] = useState<{ section: ReferenceSettingsSection; option: ReferenceOption }>();
   const [draggedSetting, setDraggedSetting] = useState<{ section: Exclude<SettingsSection, "users">; id: string }>();
   const [pendingSection, setPendingSection] = useState<SettingsSection>();
+  useEffect(() => { void prefetchUsers(); }, []);
   useEscape(() => { setDeletingReference(undefined); setDeletingCustomField(undefined); }, Boolean(deletingReference || deletingCustomField));
   useEffect(() => { if (!draggedSetting) return; function release() { setDraggedSetting(undefined); notify("Order updated. Save changes to apply."); } window.addEventListener("pointerup", release); return () => window.removeEventListener("pointerup", release); }, [draggedSetting, notify]);
   function add(e: FormEvent) { e.preventDefault(); if (!name.trim() || section === "users") return; if (section === "customFields") { const customFields = refs.customFields ?? []; const newField: CustomFieldDefinition = { id: uuid(), label: name.trim(), type: fieldType, required, active: true, order: customFields.length, options: [] }; setRefs({ ...refs, customFields: [...customFields, newField] }); } else if (section === "componentTypes") { setRefs({ ...refs, componentTypes: [...refs.componentTypes, { id: uuid(), name: name.trim(), active: true, order: refs.componentTypes.length, fields: [] }] }); } else { setRefs({ ...refs, [section]: [...refs[section], { id: uuid(), name: name.trim(), active: true, order: refs[section].length }] }); } setName(""); setRequired(false); notify("Setting added. Save changes to apply."); }
@@ -892,10 +893,11 @@ function CustomFieldSettings({ field, otherFieldNames, dragging, deleteDisabled,
 }
 
 function UsersSettings({ currentProfile, notify }: { currentProfile: Profile; notify: (message: string) => void }) {
-  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const initialProfiles = getCachedUsers();
+  const [profiles, setProfiles] = useState<Profile[]>(initialProfiles ?? []);
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initialProfiles);
   const [temporaryPassword, setTemporaryPassword] = useState<{ password: string; email: string }>();
   const [resetting, setResetting] = useState<Profile>();
   const [copied, setCopied] = useState(false);
@@ -903,12 +905,12 @@ function UsersSettings({ currentProfile, notify }: { currentProfile: Profile; no
   const [updatingId, setUpdatingId] = useState<string>();
   const [pendingAccess, setPendingAccess] = useState<{ profile: Profile; data: Partial<Profile>; title: string; detail: string }>();
   useEscape(() => { setTemporaryPassword(undefined); setResetting(undefined); setPendingAccess(undefined); setCopied(false); }, Boolean(temporaryPassword || resetting || pendingAccess));
-  const refreshUsers = useCallback(async () => { setLoading(true); try { setProfiles(await listUsers()); } catch (error) { notify(error instanceof Error ? error.message : "Unable to load users."); } finally { setLoading(false); } }, [notify]);
-  useEffect(() => { void Promise.resolve().then(refreshUsers); }, [refreshUsers]);
-  async function create(e: FormEvent) { e.preventDefault(); if (!fullName.trim() || !email.trim()) return; setCreating(true); try { const result = await createUser(fullName.trim(), email.trim()); setTemporaryPassword({ password: result.temporaryPassword, email: email.trim() }); setFullName(""); setEmail(""); await refreshUsers(); notify("User created."); } catch (error) { notify(error instanceof Error ? error.message : "Unable to create user."); } finally { setCreating(false); } }
+  const refreshUsers = useCallback(async (force = false) => { if (!getCachedUsers()) setLoading(true); try { setProfiles(await listUsers({ force })); } catch (error) { notify(error instanceof Error ? error.message : "Unable to load users."); } finally { setLoading(false); } }, [notify]);
+  useEffect(() => { void Promise.resolve().then(() => refreshUsers()); }, [refreshUsers]);
+  async function create(e: FormEvent) { e.preventDefault(); if (!fullName.trim() || !email.trim()) return; setCreating(true); try { const result = await createUser(fullName.trim(), email.trim()); setTemporaryPassword({ password: result.temporaryPassword, email: email.trim() }); setFullName(""); setEmail(""); await refreshUsers(true); notify("User created."); } catch (error) { notify(error instanceof Error ? error.message : "Unable to create user."); } finally { setCreating(false); } }
   async function resetPassword() { if (!resetting) return; try { const result = await generateUserTemporaryPassword(resetting.id); setTemporaryPassword({ password: result.temporaryPassword, email: resetting.email }); setResetting(undefined); notify("Temporary password generated."); } catch (error) { notify(error instanceof Error ? error.message : "Unable to generate a temporary password."); } }
   async function copyTemporaryPassword() { if (!temporaryPassword) return; try { await navigator.clipboard.writeText(temporaryPassword.password); setCopied(true); } catch { notify("Unable to copy the password. Select it and copy manually."); } }
-  async function patch(profile: Profile, data: Partial<Profile>) { setUpdatingId(profile.id); try { await updateUser({ ...profile, ...data }); await refreshUsers(); notify("User access updated."); } catch (error) { notify(error instanceof Error ? error.message : "Unable to update user."); } finally { setUpdatingId(undefined); } }
+  async function patch(profile: Profile, data: Partial<Profile>) { setUpdatingId(profile.id); try { await updateUser({ ...profile, ...data }); await refreshUsers(true); notify("User access updated."); } catch (error) { notify(error instanceof Error ? error.message : "Unable to update user."); } finally { setUpdatingId(undefined); } }
   async function confirmAccess() { if (!pendingAccess) return; const { profile, data } = pendingAccess; setPendingAccess(undefined); await patch(profile, data); }
   return <div>
     <form className="section toolbar" onSubmit={create}><input required className="field" value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Display name" /><input required className="field" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Staff email address" /><button className="button primary" disabled={creating}>{creating ? "Creating user..." : <><Plus size={15} />Create user</>}</button></form>

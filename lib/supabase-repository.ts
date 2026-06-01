@@ -7,6 +7,10 @@ const supabase = () => getSupabaseBrowser();
 const value = <T>(row: T | T[] | null | undefined) => Array.isArray(row) ? row[0] : row;
 export type LocationOption = { code: string; name: string };
 const locationOptionsCache = new Map<string, LocationOption[]>();
+let cachedUsers: Profile[] | undefined;
+let cachedUsersAt = 0;
+let usersRequest: Promise<Profile[]> | undefined;
+const usersCacheMs = 60_000;
 function invalidRefreshToken(error: unknown) { return typeof error === "object" && error !== null && "code" in error && (error.code === "refresh_token_not_found" || error.code === "refresh_token_already_used"); }
 export async function clearInvalidSession(error: unknown) {
   if (!invalidRefreshToken(error)) return false;
@@ -38,7 +42,7 @@ export async function signIn(email: string, password: string) {
   const { error } = await supabase().auth.signInWithPassword({ email, password });
   if (error) throw error;
 }
-export async function signOut() { await supabase().auth.signOut({ scope: "local" }); }
+export async function signOut() { cachedUsers = undefined; cachedUsersAt = 0; await supabase().auth.signOut({ scope: "local" }); }
 export async function currentSession() {
   const { data, error } = await supabase().auth.getSession();
   if (error) { if (await clearInvalidSession(error)) return null; throw error; }
@@ -204,10 +208,21 @@ export async function loadWorkspace() {
   return { profile, refs, records };
 }
 
-export async function listUsers(): Promise<Profile[]> {
-  const session = await currentSession(); const response = await fetch("/api/users", { headers: { Authorization: `Bearer ${session?.access_token}` } });
-  const data = await response.json(); if (!response.ok) throw new Error(data.error); return data.map((row: any) => ({ id: row.id, fullName: row.full_name, email: row.email, role: row.role, active: row.active }));
+export function getCachedUsers() { return cachedUsers; }
+export async function listUsers({ force = false }: { force?: boolean } = {}): Promise<Profile[]> {
+  if (!force && cachedUsers && Date.now() - cachedUsersAt < usersCacheMs) return cachedUsers;
+  if (usersRequest) return usersRequest;
+  usersRequest = (async () => {
+    const session = await currentSession(); const response = await fetch("/api/users", { headers: { Authorization: `Bearer ${session?.access_token}` } });
+    const data = await response.json(); if (!response.ok) throw new Error(data.error);
+    const profiles: Profile[] = data.map((row: any) => ({ id: row.id, fullName: row.full_name, email: row.email, role: row.role, active: row.active }));
+    cachedUsers = profiles;
+    cachedUsersAt = Date.now();
+    return profiles;
+  })();
+  try { return await usersRequest; } finally { usersRequest = undefined; }
 }
+export async function prefetchUsers() { await listUsers().catch(() => undefined); }
 export async function createUser(fullName: string, email: string) {
   const session = await currentSession(); const response = await fetch("/api/users", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` }, body: JSON.stringify({ fullName, email }) });
   const data = await response.json(); if (!response.ok) throw new Error(data.error); return data as { id: string; temporaryPassword: string };
