@@ -1,41 +1,118 @@
 "use client";
 
-import { ChangeEvent, Dispatch, FormEvent, SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import ExcelJS from "exceljs";
+import { ChangeEvent, Dispatch, FormEvent, SetStateAction, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Activity, AlertTriangle, ArrowDownAZ, ArrowUpAZ, BarChart3, CalendarRange, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleDot, ClipboardCopy, ClipboardList,
-  Download, FileSpreadsheet, GripVertical, History, ImagePlus, KeyRound, LayoutDashboard, LogOut, Menu, MessageSquareText, Package, Pencil, Plus, Power, RadioTower, Search, Wrench,
-  Settings, Trash2, Upload, Users, X, ArrowUp, ArrowDown
+  Download, FileSpreadsheet, GripVertical, History, ImagePlus, KeyRound, LogOut, MessageSquareText, MoreHorizontal, Package, Pencil, Plus, Power, RadioTower, Search, Wrench,
+  Trash2, Users, X, ArrowUp, ArrowDown
 } from "lucide-react";
 import { islandGroups, getIslandGroup } from "@/lib/location-groups";
-import { changePassword, clearInvalidSession, consumeAuthCallback, createUser, deleteReferencePermanently, generateUserTemporaryPassword, getCachedUsers, listLocationOptions, listUsers, loadInstallations, loadReferences, loadWorkspace, persistReferences, prefetchUsers, requestPasswordReset, saveInstallation, saveInstallationBatch, saveVisit, setPassword, signIn, signOut, updateOwnProfile, updateUser } from "@/lib/supabase-repository";
+import { clearInvalidSession, consumeAuthCallback, createUser, deleteReferencePermanently, generateUserTemporaryPassword, getCachedUsers, listLocationOptions, listUsers, loadInstallations, loadInstallationAuditEvents, loadInstallationByDisplayId, loadInstallationDuplicateValidationRecords, loadInstallationForVisitDisplayId, loadInstallationServiceVisits, loadInstallationSummaries, loadInstallationValidationRecords, loadReferences, loadServiceVisitSummaries, loadProfile, persistReferences, prefetchUsers, requestPasswordReset, saveInstallation, saveInstallationBatch, saveVisit, setPassword, signIn, updateUser } from "@/lib/supabase-repository";
 import { supabaseConfigured } from "@/lib/supabase-browser";
+import { useGuardedNavigation, useNavigationBlocker } from "@/lib/guarded-navigation";
 import type { LocationOption } from "@/lib/supabase-repository";
 import type { AuditEvent, Component, ComponentFieldAttachment, ComponentFieldType, ComponentTypeOption, CustomFieldDefinition, CustomFieldType, EquipmentFieldLibraryItem, Installation, Profile, ReferenceData, ReferenceOption, ServiceVisit, ServiceVisitStatus, Status } from "@/lib/types";
 
 type Page = "dashboard" | "installations" | "new" | "serviceVisits" | "import" | "settings";
 type Filter = { search: string; status: string; contractor: string; islandGroup: string; regionCode: string; provinceCode: string; municipalityCode: string; barangayCode: string; from: string; to: string; attention: "" | "missingName" | "legacyKit" };
+type ServiceVisitFilter = { search: string; status: string; type: string; contractor: string; from: string; to: string };
 type ReferenceSaveState = "idle" | "saving" | "saved" | "failed";
 type ImportRow = { row: number; kind: "Site" | "Equipment"; subject: string; details: string; reference: string; valid: boolean; issue: string };
 const emptyFilter: Filter = { search: "", status: "", contractor: "", islandGroup: "", regionCode: "", provinceCode: "", municipalityCode: "", barangayCode: "", from: "", to: "", attention: "" };
 const emptyReferences: ReferenceData = { contractors: [], unitTypes: [], componentTypes: [], equipmentFields: [], customFields: [], serviceVisitTypes: [] };
+type RouteWorkspace = { profile: Profile; refs: ReferenceData; records: Installation[]; loadedAt: number };
+const routeWorkspaceCache = new Map<string, RouteWorkspace>();
+function cachedRouteWorkspace(routeKey: string) { return routeWorkspaceCache.get(routeKey); }
+function cacheRouteWorkspace(routeKey: string, profile: Profile, refs: ReferenceData, records: Installation[]) { routeWorkspaceCache.set(routeKey, { profile, refs, records, loadedAt: Date.now() }); }
+export function invalidateRouteWorkspaceCache() { routeWorkspaceCache.clear(); }
 const statusMeta: Record<Status, { label: string; color: string }> = {
   installed: { label: "Installed", color: "oklch(0.58 0.13 155)" },
   scheduled: { label: "Scheduled", color: "oklch(0.58 0.14 245)" },
   issue: { label: "Issue", color: "oklch(0.72 0.14 70)" },
   cancelled: { label: "Cancelled", color: "oklch(0.62 0.11 28)" },
 };
-const nav = [
-  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { id: "installations", label: "Sites", icon: ClipboardList },
-  { id: "serviceVisits", label: "Service visits", icon: Wrench },
-  { id: "import", label: "Import sites", icon: Upload },
-  { id: "settings", label: "Admin settings", icon: Settings },
-] as const;
-
 function uid(prefix: string) { return `${prefix}-${Date.now().toString(36).toUpperCase()}`; }
 function uuid() { return crypto.randomUUID(); }
 function today() { return new Date().toISOString().slice(0, 10); }
+async function createWorkbook() { const { default: ExcelJS } = await import("exceljs"); return new ExcelJS.Workbook(); }
+function downloadBlob(blob: Blob, filename: string) {
+  const href = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = href; link.download = filename; link.click();
+  window.setTimeout(() => URL.revokeObjectURL(href), 0);
+}
+function useBlobUrlCleanup(photos: { url: string }[]) {
+  const photosRef = useRef(photos);
+  useEffect(() => { photosRef.current = photos; }, [photos]);
+  useEffect(() => () => photosRef.current.forEach((photo) => { if (photo.url.startsWith("blob:")) URL.revokeObjectURL(photo.url); }), []);
+}
+function handleTabKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+  if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+  const tabs = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("[role='tab']")];
+  const index = tabs.indexOf(document.activeElement as HTMLButtonElement);
+  if (index < 0) return;
+  event.preventDefault();
+  const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : event.key === "ArrowRight" ? (index + 1) % tabs.length : (index - 1 + tabs.length) % tabs.length;
+  tabs[next]?.focus();
+  tabs[next]?.click();
+}
+function pageFromPathname(pathname: string): Page {
+  if (pathname === "/dashboard") return "dashboard";
+  if (pathname === "/sites") return "installations";
+  if (pathname.startsWith("/sites/")) return "new";
+  if (pathname.startsWith("/service-visits")) return "serviceVisits";
+  if (pathname === "/import") return "import";
+  if (pathname.startsWith("/admin/")) return "settings";
+  return "dashboard";
+}
+function pathForPage(page: Page) {
+  return ({ dashboard: "/dashboard", installations: "/sites", new: "/sites/new", serviceVisits: "/service-visits", import: "/import", settings: "/admin/contractors" } as const)[page];
+}
+function safeReturnTo(value: string | null) { return value?.startsWith("/") && !value.startsWith("//") ? value : "/service-visits"; }
+function siteFilterFromSearchParams(params: URLSearchParams): Filter {
+  const attention = params.get("attention");
+  return {
+    search: params.get("search") ?? "",
+    status: params.get("status") ?? "",
+    contractor: params.get("contractor") ?? "",
+    islandGroup: params.get("islandGroup") ?? "",
+    regionCode: params.get("regionCode") ?? "",
+    provinceCode: params.get("provinceCode") ?? "",
+    municipalityCode: params.get("municipalityCode") ?? "",
+    barangayCode: params.get("barangayCode") ?? "",
+    from: params.get("from") ?? "",
+    to: params.get("to") ?? "",
+    attention: attention === "missingName" || attention === "legacyKit" ? attention : "",
+  };
+}
+function siteFilterQuery(filters: Filter) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key, value); });
+  return params.toString();
+}
+function sanitizeSiteFilter(filters: Filter, records: Installation[], refs: ReferenceData): Filter {
+  const next = { ...filters };
+  if (next.status && !Object.hasOwn(statusMeta, next.status)) next.status = "";
+  if (next.contractor && !refs.contractors.some((item) => item.name === next.contractor)) next.contractor = "";
+  if (next.islandGroup && !records.some((record) => record.islandGroup === next.islandGroup)) next.islandGroup = "";
+  if (next.regionCode && !records.some((record) => (!next.islandGroup || record.islandGroup === next.islandGroup) && record.regionCode === next.regionCode)) next.regionCode = "";
+  if (!next.regionCode) { next.provinceCode = ""; next.municipalityCode = ""; next.barangayCode = ""; return next; }
+  if (next.provinceCode && !records.some((record) => record.regionCode === next.regionCode && record.provinceCode === next.provinceCode)) next.provinceCode = "";
+  if (!next.provinceCode) { next.municipalityCode = ""; next.barangayCode = ""; return next; }
+  if (next.municipalityCode && !records.some((record) => record.provinceCode === next.provinceCode && record.municipalityCode === next.municipalityCode)) next.municipalityCode = "";
+  if (!next.municipalityCode) { next.barangayCode = ""; return next; }
+  if (next.barangayCode && !records.some((record) => record.municipalityCode === next.municipalityCode && record.barangayCode === next.barangayCode)) next.barangayCode = "";
+  return next;
+}
+function serviceVisitFilterFromSearchParams(params: URLSearchParams, minDate: string, maxDate: string): ServiceVisitFilter {
+  return { search: params.get("search") ?? "", status: params.get("status") ?? "", type: params.get("type") ?? "", contractor: params.get("contractor") ?? "", from: params.get("from") ?? minDate, to: params.get("to") ?? maxDate };
+}
+function serviceVisitFilterQuery(filters: ServiceVisitFilter, minDate: string, maxDate: string) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => { if (value && !((key === "from" && value === minDate) || (key === "to" && value === maxDate))) params.set(key, value); });
+  return params.toString();
+}
 function referenceNamesChanged(current: ReferenceData, previous: ReferenceData) {
   const names = (items: { id: string; name: string }[]) => items.map(({ id, name }) => ({ id, name }));
   return JSON.stringify(names(current.contractors)) !== JSON.stringify(names(previous.contractors))
@@ -72,52 +149,76 @@ const hiddenAuditFields = new Set(["id", "created_at", "updated_at", "created_by
 function auditTitle(value: string) { return value.replaceAll("_", " ").replace(/\b[a-z]/g, (letter) => letter.toUpperCase()); }
 function auditLabel(field: string) { return auditTitle(auditFieldLabels[field] ?? field); }
 function auditValue(value: unknown) { if (value === null || value === undefined || value === "") return "None"; if (typeof value === "boolean") return value ? "Yes" : "No"; if (typeof value === "object") return JSON.stringify(value); const text = String(value); return /^[a-z][a-z _-]*$/i.test(text) ? auditTitle(text) : text; }
-function createAudit(actor: string, action: string, summary: string, changedFields: string[] = [], beforeData?: Record<string, unknown>, afterData?: Record<string, unknown>): AuditEvent { return { id: uid("AUDIT"), action, actor, createdAt: new Date().toISOString(), summary, changedFields, beforeData, afterData }; }
-function visitAuditSummary(actor: string, visit: ServiceVisit, action: "created" | "updated") { const equipment = visit.componentChanges.map((change) => change.summary.toLowerCase()).join(", "); return `${actor} ${action} ${visit.type.toLowerCase()} service visit ${visit.id}${visit.ticketReference ? ` for ticket ${visit.ticketReference}` : ""}${equipment ? `. Equipment changes: ${equipment}` : ""}.`; }
 
 export default function TrackerApp() {
-  const [loggedIn, setLoggedIn] = useState(false);
-  const [loading, setLoading] = useState(supabaseConfigured);
+  const router = useRouter();
+  const navigate = useGuardedNavigation();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const page = pageFromPathname(pathname);
+  const siteDetailMatch = pathname.match(/^\/sites\/([^/]+)$/);
+  const siteDetailId = siteDetailMatch && siteDetailMatch[1] !== "new" ? decodeURIComponent(siteDetailMatch[1]) : "";
+  const serviceVisitDetailMatch = pathname.match(/^\/service-visits\/([^/]+)$/);
+  const serviceVisitDetailId = serviceVisitDetailMatch && serviceVisitDetailMatch[1] !== "new" ? decodeURIComponent(serviceVisitDetailMatch[1]) : "";
+  const newVisitSiteId = pathname === "/service-visits/new" ? searchParams.get("site") ?? "" : "";
+  const routeKey = `${pathname}?${newVisitSiteId}`;
+  const [initialWorkspace] = useState(() => cachedRouteWorkspace(routeKey));
+  const [loggedIn, setLoggedIn] = useState(Boolean(initialWorkspace));
+  const [loading, setLoading] = useState(supabaseConfigured && !initialWorkspace);
+  const [refreshing, setRefreshing] = useState(false);
   const [passwordSetup, setPasswordSetup] = useState(false);
-  const [profile, setProfile] = useState<Profile>();
+  const [profile, setProfile] = useState<Profile | undefined>(initialWorkspace?.profile);
   const [loadError, setLoadError] = useState("");
-  const [page, setPage] = useState<Page>("dashboard");
-  const [records, setRecords] = useState<Installation[]>([]);
-  const [refs, setRefs] = useState<ReferenceData>(emptyReferences);
-  const [savedRefs, setSavedRefs] = useState<ReferenceData>(emptyReferences);
-  const [filters, setFilters] = useState<Filter>(emptyFilter);
+  const [records, setRecords] = useState<Installation[]>(initialWorkspace?.records ?? []);
+  const [refs, setRefs] = useState<ReferenceData>(initialWorkspace?.refs ?? emptyReferences);
+  const [savedRefs, setSavedRefs] = useState<ReferenceData>(initialWorkspace?.refs ?? emptyReferences);
   const [editing, setEditing] = useState<Installation | undefined>();
+  const [loadedRouteKey, setLoadedRouteKey] = useState(initialWorkspace ? routeKey : "");
   const [toast, setToast] = useState("");
-  const [mobileMenu, setMobileMenu] = useState(false);
-  const [accountMenu, setAccountMenu] = useState(false);
-  const [nameModal, setNameModal] = useState(false);
-  const [passwordModal, setPasswordModal] = useState(false);
-  const [logoutModal, setLogoutModal] = useState(false);
-  const accountMenuRef = useRef<HTMLDivElement>(null);
-  useEscape(() => setMobileMenu(false), mobileMenu);
-  useEscape(() => setAccountMenu(false), accountMenu);
-  useEscape(() => setNameModal(false), nameModal);
-  useEscape(() => setPasswordModal(false), passwordModal);
-  useEscape(() => setLogoutModal(false), logoutModal);
-  useEffect(() => {
-    if (!accountMenu) return;
-    function onDown(event: MouseEvent) { if (accountMenuRef.current && !accountMenuRef.current.contains(event.target as Node)) setAccountMenu(false); }
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [accountMenu]);
-
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [navAttempt, setNavAttempt] = useState<Page | null>(null);
   const [referenceSaveState, setReferenceSaveState] = useState<ReferenceSaveState>("saved");
   const [referenceSaveError, setReferenceSaveError] = useState("");
-  const [settingsNavAttempt, setSettingsNavAttempt] = useState<Page | null>(null);
+  const [routeNavAttempt, setRouteNavAttempt] = useState("");
+  const siteFilterParams = searchParams.toString();
+  const siteRoute = page === "dashboard" || page === "installations";
+  const filters = useMemo(() => sanitizeSiteFilter(siteFilterFromSearchParams(new URLSearchParams(siteFilterParams)), records, refs), [records, refs, siteFilterParams]);
+  const pendingFiltersRef = useRef<Filter | undefined>(undefined);
+  const siteRecord = editing ?? (loadedRouteKey === routeKey ? records.find((record) => record.id === siteDetailId) : undefined);
+  const setPage = useCallback((next: Page) => {
+    const query = next === "dashboard" || next === "installations" ? siteFilterQuery(pendingFiltersRef.current ?? filters) : "";
+    pendingFiltersRef.current = undefined;
+    navigate(`${pathForPage(next)}${query ? `?${query}` : ""}`);
+  }, [filters, navigate]);
+  const setFilters = useCallback((next: Filter) => {
+    pendingFiltersRef.current = next;
+    if (!siteRoute) return;
+    const query = siteFilterQuery(next);
+    router.replace(`${pathname}${query ? `?${query}` : ""}`, { scroll: false });
+  }, [pathname, router, siteRoute]);
   const notify = useCallback((message: string) => { setToast(message); setTimeout(() => setToast(""), 3000); }, []);
-  const refresh = useCallback(async () => {
-    setLoading(true); setLoadError("");
-    try { const workspace = await loadWorkspace(); setProfile(workspace.profile); setRecords(workspace.records); setRefs(workspace.refs); setSavedRefs(workspace.refs); setLoggedIn(true); }
-    catch (error) { setLoggedIn(false); setLoadError(await clearInvalidSession(error) ? "Your session expired. Sign in again." : error instanceof Error ? error.message : "Unable to load FieldTrack."); }
-    finally { setLoading(false); }
-  }, []);
+  const refresh = useCallback(async ({ invalidate = false }: { invalidate?: boolean } = {}) => {
+    if (invalidate) invalidateRouteWorkspaceCache();
+    const cached = cachedRouteWorkspace(routeKey);
+    setLoading(!cached && loadedRouteKey !== routeKey); setRefreshing(Boolean(cached || loadedRouteKey === routeKey)); setLoadError("");
+    try {
+      const loadRouteRecords = page === "dashboard" || page === "installations" ? loadInstallationSummaries
+        : siteDetailId ? async () => { const [context, detail] = await Promise.all([loadInstallationDuplicateValidationRecords(), loadInstallationByDisplayId(siteDetailId)]); return [detail, ...context.filter((record) => record.id !== detail.id)]; }
+        : pathname === "/sites/new" ? loadInstallationDuplicateValidationRecords
+        : pathname === "/service-visits" ? loadServiceVisitSummaries
+        : serviceVisitDetailId ? async () => [await loadInstallationForVisitDisplayId(serviceVisitDetailId)]
+        : pathname === "/service-visits/new" && newVisitSiteId ? async () => [await loadInstallationByDisplayId(newVisitSiteId)]
+        : pathname === "/service-visits/new" ? loadInstallationSummaries
+        : pathname === "/import" ? loadInstallationValidationRecords
+        : pathname === "/admin/users" ? async () => []
+        : loadInstallationValidationRecords;
+      const [nextProfile, nextRefs, nextRecords] = await Promise.all([loadProfile(), loadReferences(), loadRouteRecords()]);
+      cacheRouteWorkspace(routeKey, nextProfile, nextRefs, nextRecords);
+      setProfile(nextProfile); setRecords(nextRecords); setRefs(nextRefs); setSavedRefs(nextRefs); setLoadedRouteKey(routeKey); setLoggedIn(true); if (pathname === "/") router.replace("/dashboard");
+    }
+    catch (error) { const expired = await clearInvalidSession(error); if (expired) invalidateRouteWorkspaceCache(); setLoggedIn(false); setLoadError(expired ? "Your session expired. Sign in again." : error instanceof Error ? error.message : "Unable to load FieldTrack."); }
+    finally { setLoading(false); setRefreshing(false); }
+  }, [loadedRouteKey, newVisitSiteId, page, pathname, routeKey, router, serviceVisitDetailId, siteDetailId]);
   useEffect(() => {
     if (!supabaseConfigured) return;
     void consumeAuthCallback()
@@ -130,18 +231,20 @@ export default function TrackerApp() {
       const reloadRecords = referenceNamesChanged(refs, savedRefs);
       await persistReferences(refs, savedRefs);
       const [latestRefs, latestRecords] = await Promise.all([loadReferences(), reloadRecords ? loadInstallations() : Promise.resolve(undefined)]);
-      setRefs(latestRefs); setSavedRefs(latestRefs); if (latestRecords) setRecords(latestRecords);
+      invalidateRouteWorkspaceCache(); setRefs(latestRefs); setSavedRefs(latestRefs); if (latestRecords) setRecords(latestRecords);
       setReferenceSaveState("saved"); notify("Settings saved."); return true;
     }
     catch (error) { setReferenceSaveState("failed"); setReferenceSaveError(error instanceof Error ? error.message : "Unable to save reference settings."); return false; }
   }, [refs, savedRefs, notify]);
   const hasUnsavedReferences = useMemo(() => JSON.stringify(refs) !== JSON.stringify(savedRefs), [refs, savedRefs]);
   useEffect(() => {
-    if (!hasUnsavedReferences) return;
+    if (!hasUnsavedReferences && !hasUnsavedChanges) return;
     function beforeUnload(event: BeforeUnloadEvent) { event.preventDefault(); event.returnValue = ""; }
     window.addEventListener("beforeunload", beforeUnload);
     return () => window.removeEventListener("beforeunload", beforeUnload);
-  }, [hasUnsavedReferences]);
+  }, [hasUnsavedChanges, hasUnsavedReferences]);
+  const blockNavigation = useCallback((href: string) => setRouteNavAttempt(href), []);
+  useNavigationBlocker((page === "new" && hasUnsavedChanges) || (page === "settings" && hasUnsavedReferences), blockNavigation);
 
   const filtered = useMemo(() => records.filter((r) =>
     (!filters.search || `${r.id} ${r.siteName} ${r.legacyKitNumber ?? ""} ${r.barangay} ${r.municipality}`.toLowerCase().includes(filters.search.toLowerCase())) &&
@@ -157,104 +260,66 @@ export default function TrackerApp() {
     (!filters.attention || (filters.attention === "missingName" ? !r.siteName : Boolean(r.legacyKitNumber)))
   ), [records, filters]);
 
-  async function save(record: Installation, dest: Page = "installations") {
-    try { await saveInstallation(record); await refresh(); setEditing(undefined); setPage(dest); setHasUnsavedChanges(false); setNavAttempt(null); notify("Site record saved."); }
+  async function save(record: Installation, dest: Page = "installations", href = "") {
+    try { await saveInstallation(record); await refresh({ invalidate: true }); setEditing(undefined); if (href) navigate(href, { bypassGuard: true }); else setPage(dest); setRouteNavAttempt(""); setHasUnsavedChanges(false); setNavAttempt(null); notify("Site record saved."); }
     catch (error) { notify(error instanceof Error ? error.message : "Unable to save site record."); }
   }
   async function saveServiceVisit(installationId: string, visit: ServiceVisit, components: Component[]) {
     const installation = records.find((record) => record.id === installationId); if (!installation) return;
-    try { await saveVisit(installation, visit, components); await refresh(); notify("Service visit saved."); }
-    catch (error) { notify(error instanceof Error ? error.message : "Unable to save service visit."); }
+    try { await saveVisit(installation, visit, components); await refresh({ invalidate: true }); notify("Service visit saved."); return true; }
+    catch (error) { notify(error instanceof Error ? error.message : "Unable to save service visit."); return false; }
   }
-  function startEdit(record: Installation) { setEditing(record); setPage("new"); }
-  function navigate(next: Page) {
-    if (next === "settings" && profile?.role !== "admin") return;
-    if (profile?.role === "guest" && (next === "new" || next === "import" || next === "settings")) return;
-    if (page === "new" && hasUnsavedChanges) {
-      setNavAttempt(next);
-    } else if (page === "settings" && next !== "settings" && hasUnsavedReferences) {
-      setSettingsNavAttempt(next);
-    } else {
-      setEditing(undefined);
-      setPage(next);
-      setMobileMenu(false);
-      setHasUnsavedChanges(false);
-      setNavAttempt(null);
-    }
-  }
+  function startEdit(record: Installation) { navigate(`/sites/${encodeURIComponent(record.id)}`); }
   if (!supabaseConfigured) return <SetupRequired />;
-  if (loading) return <div className="login"><div className="login-card"><strong>Loading FieldTrack...</strong></div></div>;
+  if (loading) return pathname === "/" ? <div className="login"><div className="login-card"><strong>Loading FieldTrack...</strong></div></div> : <RouteLoading pathname={pathname} />;
   if (passwordSetup) return <PasswordSetup onSave={async (password) => { await setPassword(password); setPasswordSetup(false); await refresh(); }} />;
-  if (!loggedIn) return <Login error={loadError} onLogin={async (email, password) => { await signIn(email, password); await refresh(); }} onReset={requestPasswordReset} />;
+  if (!loggedIn) return pathname === "/" ? <Login error={loadError} onLogin={async (email, password) => { await signIn(email, password); await refresh({ invalidate: true }); }} onReset={requestPasswordReset} /> : <div className="notice validation-notice"><strong>Unable to load this page.</strong> {loadError}<div className="toolbar" style={{ marginTop: 10 }}><button type="button" className="button" onClick={() => void refresh({ invalidate: true })}>Try again</button></div></div>;
   const canEdit = profile?.role !== "guest";
-  const availableNav = profile?.role === "admin" ? nav : nav.filter((item) => item.id !== "settings" && (profile?.role !== "guest" || item.id !== "import"));
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <div className="brand"><span className="brand-mark"><RadioTower size={17} /></span>FieldTrack</div>
-        <div className="nav">{availableNav.map(({ id, label, icon: Icon }) => { const active = page === id || (id === "installations" && page === "new"); return <button className={active ? "active" : ""} aria-current={active ? "page" : undefined} key={id} onClick={() => navigate(id)}><Icon size={17} />{label}</button>; })}</div>
-      </aside>
-      <main className="main">
-        <header className="topbar">
-          <div className="mobile-brand"><span className="brand-mark"><RadioTower size={16} /></span>FieldTrack</div>
-          <div className="muted small desktop-context">Internal site registry</div>
-          <div className="account-menu-wrap" ref={accountMenuRef}>
-            <button type="button" className="account-trigger" aria-haspopup="menu" aria-expanded={accountMenu} onClick={() => setAccountMenu((open) => !open)}>
-              <span className="account-trigger-copy"><strong>{profile?.fullName}</strong><small>{profile?.role === "admin" ? "Administrator" : profile?.role === "guest" ? "Guest" : "Staff"}</small></span>
-              <ChevronDown size={15} aria-hidden="true" />
-            </button>
-            {accountMenu && <div className="account-menu" role="menu">
-              <button type="button" role="menuitem" onClick={() => { setAccountMenu(false); setNameModal(true); }}><Pencil size={15} />Change display name</button>
-              <button type="button" role="menuitem" onClick={() => { setAccountMenu(false); setPasswordModal(true); }}><KeyRound size={15} />Change password</button>
-              <button type="button" className="danger" role="menuitem" onClick={() => { setAccountMenu(false); setLogoutModal(true); }}><LogOut size={15} />Log out</button>
-            </div>}
-          </div>
-        </header>
-
-        <div className="content">
+    <>
+          {refreshing && <div className="route-refreshing" role="status" aria-live="polite"><span />Refreshing page data...</div>}
           {page === "dashboard" && <Dashboard records={filtered} allRecords={records} refs={refs} filters={filters} setFilters={setFilters} setPage={setPage} canEdit={canEdit} />}
           {page === "installations" && <Installations records={filtered} allRecords={records} refs={refs} filters={filters} setFilters={setFilters} startEdit={startEdit} setPage={setPage} canEdit={canEdit} />}
-          {page === "serviceVisits" && <ServiceVisitsPage records={records} refs={refs} actorName={profile?.fullName || profile?.email || "Current user"} onSave={saveServiceVisit} canEdit={canEdit} />}
-          {page === "new" && (
+          {page === "serviceVisits" && <ServiceVisitsPage records={records} refs={refs} actorName={profile?.fullName || profile?.email || "Current user"} onSave={saveServiceVisit} canEdit={canEdit} routeReady={loadedRouteKey === routeKey} />}
+          {page === "new" && siteDetailId && !siteRecord && <div className="panel section muted">Loading site record...</div>}
+          {page === "new" && (!siteDetailId || siteRecord) && (
             <InstallationForm
               refs={refs}
               records={records}
               actorName={profile?.fullName || profile?.email || "Current user"}
-              initial={editing}
+              initial={siteRecord}
+              fetchAuditEvents={loadInstallationAuditEvents}
+              fetchServiceVisits={loadInstallationServiceVisits}
               onSave={(rec) => {
-                save(rec, navAttempt ?? "installations");
+                save(rec, navAttempt ?? "installations", routeNavAttempt);
               }}
               onCancel={() => {
                 setEditing(undefined);
-                setPage(navAttempt ?? "installations");
+                if (routeNavAttempt) navigate(routeNavAttempt, { bypassGuard: true }); else setPage(navAttempt ?? "installations");
+                setRouteNavAttempt("");
                 setHasUnsavedChanges(false);
                 setNavAttempt(null);
               }}
               setHasUnsavedChanges={setHasUnsavedChanges}
               navAttempt={navAttempt}
-              clearNavAttempt={() => setNavAttempt(null)}
+              clearNavAttempt={() => { setNavAttempt(null); setRouteNavAttempt(""); }}
+              routeNavAttempt={routeNavAttempt}
+              readOnly={!canEdit}
             />
           )}
-          {page === "import" && <ImportRecords refs={refs} records={records} notify={notify} onSaved={refresh} />}
-          {page === "settings" && profile?.role === "admin" && <SettingsPage refs={refs} setRefs={setRefs} records={records} profile={profile} referenceSaveState={referenceSaveState} referenceSaveError={referenceSaveError} hasUnsavedReferences={hasUnsavedReferences} saveReferences={saveReferences} discardReferences={() => setRefs(savedRefs)} refreshWorkspace={refresh} deleteComponentType={async (type) => { if (hasUnsavedReferences) { notify("Save or discard your pending settings changes before deleting an equipment type."); return; } try { await deleteReferencePermanently("componentType", type.id); await refresh(); notify(`${type.name} and its saved equipment entries were deleted.`); } catch (error) { notify(error instanceof Error ? error.message : "Unable to delete component type."); } }} deleteEquipmentField={async (field) => { if (hasUnsavedReferences) { notify("Save or discard your pending settings changes before deleting an equipment field."); return false; } try { await deleteReferencePermanently("equipmentField", field.id); await refresh(); notify(`${field.label} and its saved values were deleted.`); return true; } catch (error) { notify(error instanceof Error ? error.message : "Unable to delete equipment field."); return false; } }} notify={notify} />}
-        </div>
-
-      </main>
-      <nav className="mobile-nav" aria-label="Mobile navigation">
-        {availableNav.slice(0, 3).map(({ id, label, icon: Icon }) => { const active = page === id || (id === "installations" && page === "new"); return <button className={active ? "active" : ""} aria-current={active ? "page" : undefined} key={id} onClick={() => navigate(id)}><Icon size={18} /><span>{label === "Service visits" ? "Visits" : label}</span></button>; })}
-        {availableNav.length > 3 && <button className={page === "import" || page === "settings" ? "active" : ""} aria-expanded={mobileMenu} aria-haspopup="dialog" onClick={() => setMobileMenu(true)}><Menu size={18} /><span>More</span></button>}
-      </nav>
-      {mobileMenu && <div className="mobile-menu-backdrop" role="presentation" onClick={() => setMobileMenu(false)}><div className="mobile-menu-panel" role="dialog" aria-modal="true" aria-label="More navigation" onClick={(e) => e.stopPropagation()}><div className="section-title"><h2>More</h2><button type="button" className="button icon-button ghost" aria-label="Close menu" onClick={() => setMobileMenu(false)}><X size={17} /></button></div>{availableNav.slice(3).map(({ id, label, icon: Icon }) => <button type="button" className={`mobile-menu-link ${page === id ? "active" : ""}`} aria-current={page === id ? "page" : undefined} key={id} onClick={() => navigate(id)}><Icon size={18} />{label}</button>)}</div></div>}
+          {page === "import" && <ImportRecords refs={refs} records={records} notify={notify} onSaved={() => refresh({ invalidate: true })} />}
+          {page === "settings" && profile?.role === "admin" && <SettingsPage refs={refs} setRefs={setRefs} records={records} profile={profile} referenceSaveState={referenceSaveState} referenceSaveError={referenceSaveError} hasUnsavedReferences={hasUnsavedReferences} saveReferences={saveReferences} discardReferences={() => setRefs(savedRefs)} refreshWorkspace={() => refresh({ invalidate: true })} deleteComponentType={async (type) => { if (hasUnsavedReferences) { notify("Save or discard your pending settings changes before deleting an equipment type."); return; } try { await deleteReferencePermanently("componentType", type.id); await refresh({ invalidate: true }); notify(`${type.name} and its saved equipment entries were deleted.`); } catch (error) { notify(error instanceof Error ? error.message : "Unable to delete component type."); } }} deleteEquipmentField={async (field) => { if (hasUnsavedReferences) { notify("Save or discard your pending settings changes before deleting an equipment field."); return false; } try { await deleteReferencePermanently("equipmentField", field.id); await refresh({ invalidate: true }); notify(`${field.label} and its saved values were deleted.`); return true; } catch (error) { notify(error instanceof Error ? error.message : "Unable to delete equipment field."); return false; } }} notify={notify} />}
       {toast && <div className="toast" role="status" aria-live="polite" aria-atomic="true">{toast}</div>}
-      {settingsNavAttempt && <div className="modal-backdrop" role="presentation"><div className="modal-panel" role="alertdialog" aria-modal="true" aria-labelledby="leave-settings"><div className="modal-icon"><AlertTriangle size={20} /></div><h2 id="leave-settings">Leave settings without saving?</h2><p className="muted">Your unsaved reference-setting updates will be discarded before you leave Admin Settings.</p><div className="modal-actions"><button type="button" className="button" onClick={() => setSettingsNavAttempt(null)}>Keep editing</button><button type="button" className="button danger-solid" onClick={() => { setRefs(savedRefs); setPage(settingsNavAttempt); setSettingsNavAttempt(null); setMobileMenu(false); }}>Discard changes</button><button type="button" className="button primary" onClick={async () => { if (await saveReferences()) { setPage(settingsNavAttempt); setSettingsNavAttempt(null); setMobileMenu(false); } }}>Save and leave</button></div></div></div>}
-      {nameModal && <ChangeDisplayNameModal currentName={profile?.fullName || ""} onClose={() => setNameModal(false)} onSave={async (fullName) => { await updateOwnProfile(fullName); await refresh(); setNameModal(false); notify("Display name updated."); }} />}
-      {passwordModal && <ChangePasswordModal onClose={() => setPasswordModal(false)} onSave={async (currentPassword, password) => { await changePassword(currentPassword, password); setPasswordModal(false); notify("Password changed."); }} />}
-      {logoutModal && <ConfirmLogoutModal hasUnsavedChanges={hasUnsavedReferences} onClose={() => setLogoutModal(false)} onConfirm={async () => { await signOut(); setLogoutModal(false); setLoggedIn(false); setProfile(undefined); }} />}
-    </div>
+      {routeNavAttempt && page === "settings" && <div className="modal-backdrop" role="presentation"><div className="modal-panel" role="alertdialog" aria-modal="true" aria-labelledby="leave-settings"><div className="modal-icon"><AlertTriangle size={20} /></div><h2 id="leave-settings">Leave settings without saving?</h2><p className="muted">Your unsaved reference-setting updates will be discarded before you leave Admin Settings.</p><div className="modal-actions"><button type="button" className="button" onClick={() => setRouteNavAttempt("")}>Keep editing</button><button type="button" className="button danger-solid" onClick={() => { setRefs(savedRefs); navigate(routeNavAttempt, { bypassGuard: true }); setRouteNavAttempt(""); }}>Discard changes</button><button type="button" className="button primary" onClick={async () => { if (await saveReferences()) { navigate(routeNavAttempt, { bypassGuard: true }); setRouteNavAttempt(""); } }}>Save and leave</button></div></div></div>}
+    </>
   );
 }
 
+function RouteLoading({ pathname }: { pathname: string }) {
+  const family = pathname === "/dashboard" ? "dashboard" : pathname === "/sites" || pathname === "/service-visits" ? "table" : pathname.startsWith("/admin/") ? "settings" : "form";
+  return <div className={`route-loading route-loading-${family}`} aria-label="Loading page content" aria-live="polite" aria-busy="true"><div className="route-loading-head" /><div className="route-loading-copy" /><div className="route-loading-body"><span /><span /><span /><span /></div></div>;
+}
 function SetupRequired() { return <div className="login"><div className="login-card"><div className="brand-mark login-mark"><RadioTower size={22} /></div><h1>Supabase setup required</h1><p className="muted" style={{ marginTop: 9 }}>Add the hosted project values from <code>.env.example</code> to <code>.env.local</code>, apply the migrations, then restart FieldTrack.</p></div></div>; }
 function PasswordSetup({ onSave }: { onSave: (password: string) => Promise<void> }) {
   const [password, setPasswordValue] = useState(""); const [confirm, setConfirm] = useState(""); const [submitting, setSubmitting] = useState(false); const [message, setMessage] = useState("");
@@ -265,7 +330,7 @@ function PasswordSetup({ onSave }: { onSave: (password: string) => Promise<void>
     <div className="stack"><label>New password<input required minLength={8} className="field" type="password" value={password} onChange={(e) => setPasswordValue(e.target.value)} /></label><label>Confirm password<input required minLength={8} className="field" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} /></label>{message && <div className="notice validation-notice inline" role="alert">{message}</div>}<button className="button primary" type="submit" disabled={submitting}>{submitting ? "Saving password..." : "Set password"}</button></div>
   </form></div>;
 }
-function ChangeDisplayNameModal({ currentName, onClose, onSave }: { currentName: string; onClose: () => void; onSave: (fullName: string) => Promise<void> }) {
+export function ChangeDisplayNameModal({ currentName, onClose, onSave }: { currentName: string; onClose: () => void; onSave: (fullName: string) => Promise<void> }) {
   const [fullName, setFullName] = useState(currentName); const [confirming, setConfirming] = useState(false); const [submitting, setSubmitting] = useState(false); const [message, setMessage] = useState("");
   const trimmedName = fullName.trim();
   async function save() { setSubmitting(true); setMessage(""); try { await onSave(trimmedName); } catch (cause) { setMessage(cause instanceof Error ? cause.message : "Unable to update your name."); setConfirming(false); } finally { setSubmitting(false); } }
@@ -276,7 +341,7 @@ function ChangeDisplayNameModal({ currentName, onClose, onSave }: { currentName:
     <div className="modal-actions"><button type="button" className="button" onClick={() => confirming ? setConfirming(false) : onClose()}>{confirming ? "Back" : "Cancel"}</button><button className="button primary" disabled={submitting}>{submitting ? "Saving name..." : confirming ? "Confirm name change" : "Continue"}</button></div>
   </form></div>;
 }
-function ChangePasswordModal({ onClose, onSave }: { onClose: () => void; onSave: (currentPassword: string, password: string) => Promise<void> }) {
+export function ChangePasswordModal({ onClose, onSave }: { onClose: () => void; onSave: (currentPassword: string, password: string) => Promise<void> }) {
   const [currentPassword, setCurrentPassword] = useState(""); const [password, setPassword] = useState(""); const [confirm, setConfirm] = useState(""); const [confirming, setConfirming] = useState(false); const [submitting, setSubmitting] = useState(false); const [message, setMessage] = useState("");
   async function save() { setSubmitting(true); setMessage(""); try { await onSave(currentPassword, password); } catch (cause) { setMessage(cause instanceof Error ? cause.message : "Unable to change your password."); setConfirming(false); } finally { setSubmitting(false); } }
   return <div className="modal-backdrop" role="presentation"><form className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="change-password-title" onSubmit={(e) => { e.preventDefault(); setMessage(""); if (password.length < 8) { setMessage("Use at least 8 characters."); return; } if (password !== confirm) { setMessage("Passwords do not match."); return; } if (confirming) void save(); else setConfirming(true); }}>
@@ -286,7 +351,7 @@ function ChangePasswordModal({ onClose, onSave }: { onClose: () => void; onSave:
     <div className="modal-actions"><button type="button" className="button" onClick={() => confirming ? setConfirming(false) : onClose()}>{confirming ? "Back" : "Cancel"}</button><button className="button primary" disabled={submitting}>{submitting ? "Changing password..." : confirming ? "Confirm password change" : "Continue"}</button></div>
   </form></div>;
 }
-function ConfirmLogoutModal({ hasUnsavedChanges, onClose, onConfirm }: { hasUnsavedChanges?: boolean; onClose: () => void; onConfirm: () => Promise<void> }) {
+export function ConfirmLogoutModal({ hasUnsavedChanges, onClose, onConfirm }: { hasUnsavedChanges?: boolean; onClose: () => void; onConfirm: () => Promise<void> }) {
   const [submitting, setSubmitting] = useState(false); const [message, setMessage] = useState("");
   return <div className="modal-backdrop" role="presentation"><div className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="log-out-title"><div className="modal-icon"><LogOut size={18} /></div><h2 id="log-out-title">Log out of FieldTrack?</h2><p className="muted">{hasUnsavedChanges ? "Your unsaved reference-setting updates will be discarded when you log out." : "You will need to enter your email address and password to sign in again."}</p>{message && <div className="notice validation-notice inline" role="alert">{message}</div>}<div className="modal-actions"><button type="button" className="button" onClick={onClose}>Stay signed in</button><button type="button" className="button danger-solid" disabled={submitting} onClick={async () => { setSubmitting(true); setMessage(""); try { await onConfirm(); } catch (cause) { setMessage(cause instanceof Error ? cause.message : "Unable to log out."); setSubmitting(false); } }}>{submitting ? "Logging out..." : "Log out"}</button></div></div></div>;
 }
@@ -422,9 +487,9 @@ function Dashboard({ records, allRecords, refs, filters, setFilters, setPage, ca
 
 function Installations({ records, allRecords, refs, filters, setFilters, startEdit, setPage, canEdit }: { records: Installation[]; allRecords: Installation[]; refs: ReferenceData; filters: Filter; setFilters: (f: Filter) => void; startEdit: (r: Installation) => void; setPage: (p: Page) => void; canEdit: boolean }) {
   return <>
-    <div className="page-head"><div><p className="eyebrow">Registry</p><h1>Sites</h1><p className="muted">Find a site record and review its deployed equipment.</p></div><div className="toolbar"><button className="button" onClick={() => downloadCsv(records, refs)}><Download size={16} />Export CSV</button><button className="button" onClick={() => downloadXlsx(records, refs)}><FileSpreadsheet size={16} />Export XLSX</button>{canEdit && <button className="button primary" onClick={() => setPage("new")}><Plus size={16} />Add site</button>}</div></div>
+    <div className="page-head"><div><p className="eyebrow">Registry</p><h1>Sites</h1><p className="muted">Find a site record and review its deployed equipment.</p></div><div className="toolbar"><button className="button" onClick={() => downloadCsv(records, refs)}><Download size={16} />Export CSV</button><button className="button" onClick={async () => downloadXlsx(await loadInstallationValidationRecords(), refs)}><FileSpreadsheet size={16} />Export XLSX</button>{canEdit && <button className="button primary" onClick={() => setPage("new")}><Plus size={16} />Add site</button>}</div></div>
     <div style={{ marginBottom: 16 }}><FilterBar records={allRecords} refs={refs} filters={filters} setFilters={setFilters} compact /></div>
-    <div className="panel"><div className="panel-head"><strong>{records.length} records</strong></div><RecordsTable key={JSON.stringify(filters)} records={records} onSelect={canEdit ? startEdit : undefined} detailed /></div>
+    <div className="panel"><div className="panel-head"><strong>{records.length} records</strong></div><RecordsTable key={JSON.stringify(filters)} records={records} onSelect={startEdit} detailed canEdit={canEdit} /></div>
   </>;
 }
 
@@ -434,7 +499,7 @@ function SiteSortHeader({ label, column, sortable, sort, onSort }: { label: stri
   const active = sort?.key === column;
   return <th aria-sort={active ? sort.direction === "asc" ? "ascending" : "descending" : "none"}><button type="button" className={`table-sort ${active ? "active" : ""}`} onClick={() => onSort(column)}>{label}{active && sort.direction === "desc" ? <ArrowDownAZ size={14} /> : <ArrowUpAZ size={14} />}</button></th>;
 }
-function RecordsTable({ records, onSelect, detailed = false }: { records: Installation[]; onSelect?: (r: Installation) => void; detailed?: boolean }) {
+function RecordsTable({ records, onSelect, detailed = false, canEdit = true }: { records: Installation[]; onSelect?: (r: Installation) => void; detailed?: boolean; canEdit?: boolean }) {
   const [sort, setSort] = useState<{ key: SiteSortKey; direction: "asc" | "desc" }>();
   const [page, setPage] = useState(1);
   const sortable = detailed;
@@ -454,22 +519,43 @@ function RecordsTable({ records, onSelect, detailed = false }: { records: Instal
   const firstVisible = sortedRecords.length ? (currentPage - 1) * pageSize + 1 : 0;
   const lastVisible = Math.min(currentPage * pageSize, sortedRecords.length);
   function toggleSort(key: SiteSortKey) { if (!sortable) return; setPage(1); setSort((current) => current?.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: "asc" }); }
-  if (!records.length) return <div className="empty"><ClipboardList size={25} /><p><strong>No sites match these filters.</strong></p><span>Clear a filter or add a site record.</span></div>;
+  if (!records.length) return <div className="empty"><ClipboardList size={25} /><p><strong>No sites match these filters.</strong></p><span>{canEdit ? "Clear a filter or add a site record." : "Clear a filter or ask a staff user to add a site record."}</span></div>;
   const sortHeader = (label: string, column: SiteSortKey) => <SiteSortHeader label={label} column={column} sortable={sortable} sort={sort} onSort={toggleSort} />;
   return <><div className={`table-wrap ${detailed ? "sites-table-wrap" : ""}`}><table className={detailed ? "sites-table" : undefined}><thead><tr>{sortHeader("Site name", "siteName")}{sortHeader("Installation ID", "id")}{detailed && sortHeader("Island group", "islandGroup")}{sortHeader("Location", "location")}{detailed && sortHeader("Solution", "unitType")}{sortHeader("Contractor", "contractor")}{sortHeader("Installation date", "installDate")}{sortHeader("Status", "status")}{sortHeader("Equipment", "equipment")}{detailed && sortHeader("Updated by", "updatedBy")}{onSelect && <th><span className="sr-only">Actions</span></th>}</tr></thead><tbody>{visibleRecords.map((r) => <tr key={r.id} onClick={() => onSelect?.(r)} style={{ cursor: onSelect ? "pointer" : "default" }}><td>{r.siteName || <span className="pill issue">Site name required</span>}</td><td><strong>{r.id}</strong></td>{detailed && <td>{r.islandGroup || "None"}</td>}<td>{r.barangay}, {r.municipality}</td>{detailed && <td>{r.unitType}</td>}<td>{r.contractor}</td><td>{niceDate(r.installDate)}</td><td><StatusPill status={r.status} /></td><td>{r.components.length}</td>{detailed && <td>{r.updatedBy}</td>}{onSelect && <td><button type="button" className="button icon-button ghost" aria-label={`View ${r.siteName || r.id}`} onClick={(event) => { event.stopPropagation(); onSelect(r); }}><ChevronRight size={16} /></button></td>}</tr>)}</tbody></table></div>{detailed && <div className="pagination"><span className="small muted">Showing {firstVisible}-{lastVisible} of {sortedRecords.length} records | {pageSize} rows per page</span><div className="toolbar"><button type="button" className="button icon-button" aria-label="Previous page" disabled={currentPage === 1} onClick={() => setPage((current) => Math.max(1, current - 1))}><ChevronLeft size={16} /></button><span className="pagination-page small">Page {currentPage} of {pageCount}</span><button type="button" className="button icon-button" aria-label="Next page" disabled={currentPage === pageCount} onClick={() => setPage((current) => Math.min(pageCount, current + 1))}><ChevronRight size={16} /></button></div></div>}</>;
 }
 
-function ServiceVisitsPage({ records, refs, actorName, onSave, canEdit }: { records: Installation[]; refs: ReferenceData; actorName: string; onSave: (installationId: string, visit: ServiceVisit, components: Component[]) => void; canEdit: boolean }) {
+function ServiceVisitsPage({ records, refs, actorName, onSave, canEdit, routeReady }: { records: Installation[]; refs: ReferenceData; actorName: string; onSave: (installationId: string, visit: ServiceVisit, components: Component[]) => Promise<boolean | undefined>; canEdit: boolean; routeReady: boolean }) {
+  const router = useRouter();
+  const navigate = useGuardedNavigation();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const allDates = records.flatMap((r) => r.serviceVisits.map((v) => v.scheduledDate)).filter(Boolean);
   const minDate = allDates.length ? allDates.reduce((a, b) => (a < b ? a : b)) : "";
   const maxDate = allDates.length ? allDates.reduce((a, b) => (a > b ? a : b)) : "";
-  const [filters, setFilters] = useState({ search: "", status: "", type: "", contractor: "", from: minDate, to: maxDate });
-  const [editing, setEditing] = useState<{ installation: Installation; visit?: ServiceVisit }>();
+  const serviceFilterParams = searchParams.toString();
+  const filters = useMemo(() => {
+    const next = serviceVisitFilterFromSearchParams(new URLSearchParams(serviceFilterParams), minDate, maxDate);
+    if (next.status && !Object.hasOwn(serviceStatusLabels, next.status)) next.status = "";
+    if (next.type && !refs.serviceVisitTypes.some((item) => item.name === next.type)) next.type = "";
+    if (next.contractor && !refs.contractors.some((item) => item.name === next.contractor)) next.contractor = "";
+    return next;
+  }, [maxDate, minDate, refs.contractors, refs.serviceVisitTypes, serviceFilterParams]);
+  const setFilters = useCallback((next: ServiceVisitFilter) => {
+    if (pathname !== "/service-visits") return;
+    const query = serviceVisitFilterQuery(next, minDate, maxDate);
+    router.replace(`/service-visits${query ? `?${query}` : ""}`, { scroll: false });
+  }, [maxDate, minDate, pathname, router]);
   const [newInstallationId, setNewInstallationId] = useState(records[0]?.id ?? "");
   const [siteSearch, setSiteSearch] = useState("");
-  const [chooseSite, setChooseSite] = useState(false);
+  const [chooseSite, setChooseSite] = useState(pathname === "/service-visits/new" && !searchParams.get("site"));
   const [advanced, setAdvanced] = useState(false);
   useEscape(() => { setChooseSite(false); setSiteSearch(""); }, chooseSite);
+  const visitDetailMatch = pathname.match(/^\/service-visits\/([^/]+)$/);
+  const visitDetailId = visitDetailMatch && visitDetailMatch[1] !== "new" ? decodeURIComponent(visitDetailMatch[1]) : "";
+  const routeVisit = visitDetailId ? records.flatMap((installation) => installation.serviceVisits.map((visit) => ({ installation, visit }))).find(({ visit }) => visit.id === visitDetailId) : undefined;
+  const routeInstallation = pathname === "/service-visits/new" ? records.find((record) => record.id === searchParams.get("site")) : undefined;
+  const activeEditing = routeReady ? routeVisit ?? (routeInstallation ? { installation: routeInstallation } : undefined) : undefined;
+  const returnTo = safeReturnTo(searchParams.get("returnTo"));
 
   const matchingVisits = records.flatMap((installation) => installation.serviceVisits.map((visit) => ({ installation, visit }))).filter(({ installation, visit }) =>
     (!filters.search || `${installation.siteName} ${installation.id} ${visit.ticketReference}`.toLowerCase().includes(filters.search.toLowerCase())) &&
@@ -481,8 +567,10 @@ function ServiceVisitsPage({ records, refs, actorName, onSave, canEdit }: { reco
   const counts = (Object.keys(serviceStatusLabels) as ServiceVisitStatus[]).map((status) => ({ status, count: matchingVisits.filter(({ visit }) => visit.status === status).length }));
   const active = filters.search || filters.status || filters.type || filters.contractor || filters.from !== minDate || filters.to !== maxDate;
   function clearFilters() { setFilters({ search: "", status: "", type: "", contractor: "", from: minDate, to: maxDate }); }
+  if (activeEditing) return <ServiceVisitModal fullPage readOnly={!canEdit} refs={refs} installation={activeEditing.installation} visit={"visit" in activeEditing ? activeEditing.visit : undefined} actorName={actorName} onClose={(bypassGuard) => navigate(returnTo, { bypassGuard })} onSave={(visit, components) => onSave(activeEditing.installation.id, visit, components)} />;
+  if (pathname !== "/service-visits" && !routeReady) return <div className="panel section muted">Loading service visit...</div>;
   return <>
-    <div className="page-head"><div><p className="eyebrow">Field support</p><h1>Service visits</h1><p className="muted">Track contractor maintenance, inspections, repairs, and equipment replacements.</p></div>{canEdit && <button className="button primary" onClick={() => { setSiteSearch(""); setChooseSite(true); }}><Plus size={16} />New service visit</button>}</div>
+    <div className="page-head"><div><p className="eyebrow">Field support</p><h1>Service visits</h1><p className="muted">Track contractor maintenance, inspections, repairs, and equipment replacements.</p></div>{canEdit && <button className="button primary" onClick={() => navigate("/service-visits/new")}><Plus size={16} />New service visit</button>}</div>
     <div className="stats">{counts.map(({ status, count }) => <button type="button" className={`stat stat-button ${filters.status === status ? "active" : ""}`} aria-pressed={filters.status === status} key={status} onClick={() => setFilters({ ...filters, status: filters.status === status ? "" : status })}><span className="small muted">{serviceStatusLabels[status]}</span><span className="stat-value">{count}<span className="status-dot" style={{ background: status === "completed" ? statusMeta.installed.color : status === "cancelled" ? statusMeta.cancelled.color : status === "in_progress" ? statusMeta.issue.color : statusMeta.scheduled.color }} /></span></button>)}</div>
     <div className="panel"><div className="section filter-stack"><div className="toolbar filter-row">
       <div className="input-wrap"><Search className="input-icon" size={17} /><input className="field search" aria-label="Search service visits" placeholder="Search site or ticket" value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} /></div>
@@ -492,10 +580,9 @@ function ServiceVisitsPage({ records, refs, actorName, onSave, canEdit }: { reco
     </div>
     {advanced && <div className="toolbar filter-row advanced-filter-row"><select className="select" aria-label="Filter service visits by type" value={filters.type} onChange={(e) => setFilters({ ...filters, type: e.target.value })}><option value="">All visit types</option>{refs.serviceVisitTypes.map((type) => <option key={type.id}>{type.name}</option>)}</select></div>}
     <div className="status-filter-row" role="group" aria-label="Filter service visits by status"><div className="status-filter-pills"><button type="button" className={`button status-filter-pill ${!filters.status ? "active" : ""}`} aria-pressed={!filters.status} onClick={() => setFilters({ ...filters, status: "" })}>All visits</button>{(Object.keys(serviceStatusLabels) as ServiceVisitStatus[]).map((status) => <button type="button" className={`button status-filter-pill ${filters.status === status ? "active" : ""}`} aria-pressed={filters.status === status} key={status} onClick={() => setFilters({ ...filters, status })}><span className="status-dot" style={{ background: status === "completed" ? statusMeta.installed.color : status === "cancelled" ? statusMeta.cancelled.color : status === "in_progress" ? statusMeta.issue.color : statusMeta.scheduled.color }} />{serviceStatusLabels[status]}</button>)}</div><DateRangeFilter from={filters.from} to={filters.to} minDate={minDate} maxDate={maxDate} onChange={(range) => setFilters({ ...filters, ...range })} ariaLabel="Filter service visits by scheduled date" /></div></div>
-      <ServiceVisitTable key={JSON.stringify(filters)} visits={visits} onSelect={canEdit ? (installation, visit) => setEditing({ installation, visit }) : undefined} />
+      <ServiceVisitTable key={JSON.stringify(filters)} visits={visits} onSelect={(_, visit) => navigate(`/service-visits/${encodeURIComponent(visit.id)}`)} />
     </div>
-    {chooseSite && <div className="modal-backdrop" role="presentation"><div className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="choose-visit-site"><div className="modal-header"><div><h2 id="choose-visit-site">Choose a site</h2><p className="muted">Search for the site receiving contractor support.</p></div><button type="button" className="button icon-button ghost" aria-label="Close site chooser" onClick={() => { setChooseSite(false); setSiteSearch(""); }}><X size={17} /></button></div><label>Search sites<div className="input-wrap"><Search className="input-icon" size={16} /><input autoFocus className="field search" value={siteSearch} onChange={(e) => setSiteSearch(e.target.value)} placeholder="Site name, ID, location, or contractor" /></div></label><div className="site-search-results" style={{ display: "grid", gap: 4, maxHeight: 244, marginTop: 10, padding: 4, overflowY: "auto", border: "1px solid var(--line)", borderRadius: 8, background: "var(--surface-muted)" }} role="listbox" aria-label="Matching sites">{matchingSites.length ? matchingSites.map((record) => { const selected = record.id === newInstallationId; return <button type="button" className={`button site-search-result ${selected ? "selected" : ""}`} style={{ display: "grid", justifyContent: "stretch", gap: 3, width: "100%", minHeight: 0, padding: "9px 10px", borderColor: selected ? "oklch(0.76 0.06 164)" : "transparent", background: selected ? "var(--accent-soft)" : "transparent", textAlign: "left" }} role="option" aria-selected={selected} key={record.id} onClick={() => setNewInstallationId(record.id)}><strong>{record.siteName || "Site name required"}</strong><span>{record.id} | {record.barangay}, {record.municipality}</span></button>; }) : <div className="site-search-empty">No sites match your search.</div>}</div><div className="modal-actions"><button type="button" className="button" onClick={() => { setChooseSite(false); setSiteSearch(""); }}>Cancel</button><button type="button" className="button primary" disabled={!matchingSites.some((record) => record.id === newInstallationId)} onClick={() => { const installation = records.find((record) => record.id === newInstallationId); if (installation) { setChooseSite(false); setSiteSearch(""); setEditing({ installation }); } }}><Plus size={15} />Continue</button></div></div></div>}
-    {editing && <ServiceVisitModal refs={refs} installation={editing.installation} visit={editing.visit} actorName={actorName} onClose={() => setEditing(undefined)} onSave={(visit, components) => { onSave(editing.installation.id, visit, components); setEditing(undefined); }} />}
+    {chooseSite && <div className="modal-backdrop" role="presentation"><div className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="choose-visit-site"><div className="modal-header"><div><h2 id="choose-visit-site">Choose a site</h2><p className="muted">Search for the site receiving contractor support.</p></div><button type="button" className="button icon-button ghost" aria-label="Close site chooser" onClick={() => { setChooseSite(false); setSiteSearch(""); navigate("/service-visits"); }}><X size={17} /></button></div><label>Search sites<div className="input-wrap"><Search className="input-icon" size={16} /><input autoFocus className="field search" value={siteSearch} onChange={(e) => setSiteSearch(e.target.value)} placeholder="Site name, ID, location, or contractor" /></div></label><div className="site-search-results" style={{ display: "grid", gap: 4, maxHeight: 244, marginTop: 10, padding: 4, overflowY: "auto", border: "1px solid var(--line)", borderRadius: 8, background: "var(--surface-muted)" }} role="listbox" aria-label="Matching sites">{matchingSites.length ? matchingSites.map((record) => { const selected = record.id === newInstallationId; return <button type="button" className={`button site-search-result ${selected ? "selected" : ""}`} style={{ display: "grid", justifyContent: "stretch", gap: 3, width: "100%", minHeight: 0, padding: "9px 10px", borderColor: selected ? "oklch(0.76 0.06 164)" : "transparent", background: selected ? "var(--accent-soft)" : "transparent", textAlign: "left" }} role="option" aria-selected={selected} key={record.id} onClick={() => setNewInstallationId(record.id)}><strong>{record.siteName || "Site name required"}</strong><span>{record.id} | {record.barangay}, {record.municipality}</span></button>; }) : <div className="site-search-empty">No sites match your search.</div>}</div><div className="modal-actions"><button type="button" className="button" onClick={() => { setChooseSite(false); setSiteSearch(""); navigate("/service-visits"); }}>Cancel</button><button type="button" className="button primary" disabled={!matchingSites.some((record) => record.id === newInstallationId)} onClick={() => { const installation = records.find((record) => record.id === newInstallationId); if (installation) { setChooseSite(false); setSiteSearch(""); router.replace(`/service-visits/new?site=${encodeURIComponent(installation.id)}`); } }}><Plus size={15} />Continue</button></div></div></div>}
   </>;
 }
 
@@ -520,7 +607,8 @@ function AuditTimeline({ events }: { events: AuditEvent[] }) {
   })}</div>;
 }
 
-function ServiceVisitModal({ refs, installation, visit, actorName, onClose, onSave }: { refs: ReferenceData; installation: Installation; visit?: ServiceVisit; actorName: string; onClose: () => void; onSave: (visit: ServiceVisit, components: Component[]) => void }) {
+function ServiceVisitModal({ refs, installation, visit, actorName, onClose, onSave, fullPage = false, readOnly = false }: { refs: ReferenceData; installation: Installation; visit?: ServiceVisit; actorName: string; onClose: (bypassGuard?: boolean) => void; onSave: (visit: ServiceVisit, components: Component[]) => Promise<boolean | undefined>; fullPage?: boolean; readOnly?: boolean }) {
+  const navigate = useGuardedNavigation();
   const now = new Date().toISOString(); const id = visit?.id ?? uid("VISIT");
   const [initialDraft] = useState<ServiceVisit>(() => visit ?? { id, type: refs.serviceVisitTypes.find((item) => item.active)?.name ?? "", status: "scheduled", ticketReference: "", contractor: installation.contractor, scheduledDate: today(), notes: "", photos: [], componentChanges: [], createdBy: actorName, updatedBy: actorName, createdAt: now, updatedAt: now });
   const [draft, setDraft] = useState<ServiceVisit>(initialDraft);
@@ -529,29 +617,47 @@ function ServiceVisitModal({ refs, installation, visit, actorName, onClose, onSa
   const [showEquipment, setShowEquipment] = useState(false);
   const [showPhotos, setShowPhotos] = useState(false);
   const [showDiscard, setShowDiscard] = useState(false);
+  const [pendingHref, setPendingHref] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const dirty = JSON.stringify(draft) !== JSON.stringify(initialDraft) || removedIds.length > 0 || newComponents.length > 0;
   function requestClose() { if (dirty) setShowDiscard(true); else onClose(); }
   useEscape(requestClose);
+  useNavigationBlocker(fullPage && dirty && !submitting, (href) => { setPendingHref(href); setShowDiscard(true); });
+  useBlobUrlCleanup(draft.photos);
+  useEffect(() => {
+    if (!dirty) return;
+    function beforeUnload(event: BeforeUnloadEvent) { event.preventDefault(); event.returnValue = ""; }
+    window.addEventListener("beforeunload", beforeUnload);
+    return () => window.removeEventListener("beforeunload", beforeUnload);
+  }, [dirty]);
   const activeComponents = installation.components.filter((component) => !component.removedAt);
   const incompleteNewComponent = newComponents.some((component) => visibleComponentFields(refs, component).some((field) => field.active && field.required && !component.values[field.id]?.trim()));
   const invalidNewMac = newComponents.some((component) => visibleComponentFields(refs, component).some((field) => libraryField(refs, field)?.type === "mac" && component.values[field.id] && !normalizeMac(component.values[field.id])));
   const invalidNewInteger = newComponents.some((component) => visibleComponentFields(refs, component).some((field) => libraryField(refs, field)?.type === "integer" && component.values[field.id] && !validInteger(component.values[field.id])));
-  function saveVisit() {
+  async function saveVisit() {
     const updatedAt = new Date().toISOString(); const changes = [...draft.componentChanges];
     const components = installation.components.map((component) => removedIds.includes(component.id) && !component.removedAt ? { ...component, removedAt: updatedAt, removedViaVisitId: draft.id } : component);
     removedIds.forEach((componentId) => { const component = installation.components.find((item) => item.id === componentId); if (component && !component.removedAt) changes.push({ id: uid("VISITCHANGE"), action: "removed", componentId, componentType: component.type, summary: `Removed ${component.type}` }); });
     newComponents.forEach((item) => { const component: Component = { ...item, values: Object.fromEntries(Object.entries(item.values).map(([key, value]) => { const field = visibleComponentFields(refs, item).find((candidate) => candidate.id === key); return [key, field && libraryField(refs, field)?.type === "mac" ? normalizeMac(value) : value]; })), installedAt: updatedAt, installedViaVisitId: draft.id }; components.push(component); changes.push({ id: uid("VISITCHANGE"), action: "installed", componentId: component.id, componentType: component.type, summary: `Installed ${component.type}` }); });
-    onSave({ ...draft, updatedBy: actorName, updatedAt, completedDate: draft.status === "completed" ? draft.completedDate || today() : draft.completedDate, componentChanges: changes }, components);
+    setSubmitting(true); setSaveError("");
+    const saved = await onSave({ ...draft, updatedBy: actorName, updatedAt, completedDate: draft.status === "completed" ? draft.completedDate || today() : draft.completedDate, componentChanges: changes }, components);
+    setSubmitting(false);
+    if (!saved) { setSaveError("The service visit could not be saved. Review the page message and try again."); return; }
+    if (pendingHref) navigate(pendingHref, { bypassGuard: true }); else onClose(true);
   }
   function photos(e: ChangeEvent<HTMLInputElement>) { const files = Array.from(e.target.files ?? []).slice(0, 4); setDraft({ ...draft, photos: [...draft.photos, ...files.map((file) => ({ name: file.name, url: URL.createObjectURL(file) }))] }); }
-  return <div className="modal-backdrop" role="presentation"><div className="modal-panel modal-wide" role="dialog" aria-modal="true" aria-labelledby={`visit-${draft.id}`}>
+  return <div className={fullPage ? "panel service-visit-page" : "modal-backdrop"} role="presentation"><div className={fullPage ? "section" : "modal-panel modal-wide"} role={fullPage ? "region" : "dialog"} aria-modal={fullPage ? undefined : true} aria-labelledby={`visit-${draft.id}`}>
     <div className="modal-header"><div><p className="eyebrow">Contractor revisit</p><h2 id={`visit-${draft.id}`}>{visit ? draft.id : "New service visit"}</h2></div><button type="button" className="button icon-button ghost" aria-label="Close service visit" onClick={requestClose}><X size={17} /></button></div>
+    <fieldset className="service-visit-fields" disabled={readOnly}>
     <div className="grid-3"><label>Visit type<select className="select" value={draft.type} onChange={(e) => setDraft({ ...draft, type: e.target.value })}>{activeOptions(refs.serviceVisitTypes, draft.type).map((item) => <option key={item.id}>{item.name}</option>)}</select></label><label>Status<select className="select" value={draft.status} onChange={(e) => setDraft({ ...draft, status: e.target.value as ServiceVisitStatus })}>{Object.entries(serviceStatusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><label>Ticket reference<input className="field" value={draft.ticketReference} onChange={(e) => setDraft({ ...draft, ticketReference: e.target.value })} placeholder="Optional ticket number" /></label><label>Contractor<select className="select" value={draft.contractor} onChange={(e) => setDraft({ ...draft, contractor: e.target.value })}>{activeOptions(refs.contractors, draft.contractor).map((item) => <option key={item.id}>{item.name}</option>)}</select></label><label>Scheduled date<input className="field" type="date" value={draft.scheduledDate} onChange={(e) => setDraft({ ...draft, scheduledDate: e.target.value })} /></label>{draft.status === "completed" && <label>Completed date<input className="field" type="date" value={draft.completedDate ?? ""} onChange={(e) => setDraft({ ...draft, completedDate: e.target.value })} /><span className="field-help">Leave blank to use today.</span></label>}</div>
     <label className="field-block">Visit notes<textarea className="textarea" rows={3} value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} placeholder="Work performed, findings, and follow-up actions" /></label>
     <div className="visit-section"><button type="button" className="button disclosure-button" aria-expanded={showEquipment} onClick={() => setShowEquipment(!showEquipment)}>{showEquipment ? "Hide equipment changes" : "Add equipment changes"}{removedIds.length + newComponents.length > 0 && <span className="pill scheduled">{removedIds.length + newComponents.length}</span>}</button>{showEquipment && <div className="visit-equipment"><h3>Equipment changes</h3><div className="small muted">Select equipment removed during this visit and add installed equipment with its required identifiers.</div>{activeComponents.map((component) => <label className="check-row" key={component.id}><input type="checkbox" checked={removedIds.includes(component.id)} onChange={(e) => setRemovedIds(e.target.checked ? [...removedIds, component.id] : removedIds.filter((id) => id !== component.id))} />Remove {component.type} {Object.values(component.values)[0] ? `(${Object.values(component.values)[0]})` : ""}</label>)}{newComponents.map((component) => <div className="component-template-row" key={component.id}><div className="component-row"><strong>Install {component.type}</strong>{visibleComponentFields(refs, component).map((field) => { const reusable = libraryField(refs, field); return reusable ? <label key={field.id}>{reusable.label}{field.required ? " *" : ""}<EquipmentValueInput type={reusable.type} label={reusable.label} value={component.values[field.id] ?? ""} required={field.required} onChange={(value) => setNewComponents(newComponents.map((item) => item.id === component.id ? { ...item, values: { ...item.values, [field.id]: value } } : item))} /></label> : null; })}<button type="button" className="button icon-button danger" aria-label={`Remove new ${component.type}`} onClick={() => setNewComponents(newComponents.filter((item) => item.id !== component.id))}><Trash2 size={14} /></button></div></div>)}{incompleteNewComponent && <div className="notice validation-notice" role="alert"><strong>Complete the required replacement equipment fields.</strong></div>}{invalidNewMac && <div className="notice validation-notice" role="alert"><strong>Check the replacement MAC address format.</strong></div>}{invalidNewInteger && <div className="notice validation-notice" role="alert"><strong>Enter whole numbers for integer equipment fields.</strong></div>}<div className="toolbar"><select className="select" aria-label="Choose installed component type" id={`new-component-${draft.id}`} defaultValue=""><option value="">Choose installed component</option>{refs.componentTypes.filter((item) => item.active).map((item) => <option key={item.id}>{item.name}</option>)}</select><button type="button" className="button" onClick={() => { const select = document.getElementById(`new-component-${draft.id}`) as HTMLSelectElement; if (select.value) { setNewComponents([...newComponents, { id: uuid(), type: select.value, values: {}, notes: "" }]); select.value = ""; } }}><Plus size={14} />Add installed equipment</button></div></div>}</div>
     <div className="visit-section"><button type="button" className="button disclosure-button" aria-expanded={showPhotos} onClick={() => setShowPhotos(!showPhotos)}>{showPhotos ? "Hide visit photos" : "Add visit photos"}{draft.photos.length > 0 && <span className="pill scheduled">{draft.photos.length}</span>}</button>{showPhotos && <><label className="dropzone compact"><ImagePlus size={18} style={{ margin: "auto" }} /><span>Choose optional visit photos</span><input type="file" accept="image/*" multiple hidden onChange={photos} /></label>{draft.photos.length > 0 && <p className="small muted">{draft.photos.map((photo) => photo.name).join(", ")}</p>}</>}</div>
-    <div className="modal-actions"><button type="button" className="button" onClick={requestClose}>Cancel</button><button type="button" className="button primary" disabled={incompleteNewComponent || invalidNewMac || invalidNewInteger} onClick={saveVisit}>Save service visit</button></div>
-    {showDiscard && <div className="nested-modal-backdrop" role="presentation"><div className="modal-panel discard-modal" role="alertdialog" aria-modal="true" aria-labelledby={`discard-${draft.id}`}><div className="modal-icon"><AlertTriangle size={20} /></div><h2 id={`discard-${draft.id}`}>Discard service visit changes?</h2><p className="muted">Your notes, equipment updates, and photo selections will not be saved.</p><div className="modal-actions"><button type="button" className="button" onClick={() => setShowDiscard(false)}>Keep editing</button><button type="button" className="button danger-solid" onClick={onClose}>Discard changes</button></div></div></div>}
+    </fieldset>
+    {saveError && <div className="notice validation-notice inline" role="alert">{saveError}</div>}
+    <div className="modal-actions"><button type="button" className="button" disabled={submitting} onClick={requestClose}>{readOnly ? "Back to service visits" : "Cancel"}</button>{!readOnly && <button type="button" className="button primary" disabled={submitting || incompleteNewComponent || invalidNewMac || invalidNewInteger} onClick={() => void saveVisit()}>{submitting ? "Saving service visit..." : "Save service visit"}</button>}</div>
+    {showDiscard && <div className="nested-modal-backdrop" role="presentation"><div className="modal-panel discard-modal" role="alertdialog" aria-modal="true" aria-labelledby={`discard-${draft.id}`}><div className="modal-icon"><AlertTriangle size={20} /></div><h2 id={`discard-${draft.id}`}>Leave without saving changes?</h2><p className="muted">Your notes, equipment updates, and photo selections will not be saved.</p><div className="modal-actions"><button type="button" className="button" onClick={() => { setPendingHref(""); setShowDiscard(false); }}>Keep editing</button><button type="button" className="button danger-solid" onClick={() => pendingHref ? navigate(pendingHref, { bypassGuard: true }) : onClose(true)}>Discard changes</button><button type="button" className="button primary" disabled={submitting || incompleteNewComponent || invalidNewMac || invalidNewInteger} onClick={() => void saveVisit()}>{submitting ? "Saving..." : "Save and leave"}</button></div></div></div>}
   </div></div>;
 }
 
@@ -560,31 +666,49 @@ function InstallationForm({
   records,
   actorName,
   initial,
+  fetchAuditEvents,
+  fetchServiceVisits,
   onSave,
   onCancel,
   setHasUnsavedChanges,
   navAttempt,
-  clearNavAttempt
+  clearNavAttempt,
+  routeNavAttempt,
+  readOnly = false
 }: {
   refs: ReferenceData;
   records: Installation[];
   actorName: string;
   initial?: Installation;
+  fetchAuditEvents?: (installationId: string) => Promise<AuditEvent[]>;
+  fetchServiceVisits?: (installationId: string) => Promise<ServiceVisit[]>;
   onSave: (r: Installation) => void;
   onCancel: () => void;
   setHasUnsavedChanges: (dirty: boolean) => void;
   navAttempt: Page | null;
   clearNavAttempt: () => void;
+  routeNavAttempt?: string;
+  readOnly?: boolean;
 }) {
+  const navigate = useGuardedNavigation();
   const createdAt = new Date().toISOString();
   const [record, setRecord] = useState<Installation>(initial ?? { id: uid("INS"), siteName: "", unitType: refs.unitTypes.find((x) => x.active)?.name ?? "", contractor: refs.contractors.find((x) => x.active)?.name ?? "", installDate: today(), status: "scheduled", islandGroup: "", region: "", regionCode: "", province: "", provinceCode: "", municipality: "", municipalityCode: "", barangay: "", barangayCode: "", address: "", remarks: "", components: [], customValues: {}, photos: [], createdBy: actorName, createdAt, updatedBy: actorName, updatedAt: createdAt, serviceVisits: [], auditEvents: [] });
   const [tab, setTab] = useState<"overview" | "visits" | "audit">("overview");
-  const [visitOpen, setVisitOpen] = useState<ServiceVisit | null>();
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>(initial?.auditEvents ?? []);
+  const [auditLoaded, setAuditLoaded] = useState(!initial?.dbId || Boolean(initial.auditEvents.length));
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState("");
+  const [serviceVisits, setServiceVisits] = useState<ServiceVisit[]>(initial?.serviceVisits ?? []);
+  const [visitsLoaded, setVisitsLoaded] = useState(!initial?.dbId || Boolean(initial.serviceVisits.length));
+  const [visitsLoading, setVisitsLoading] = useState(false);
+  const [visitsError, setVisitsError] = useState("");
   const [showRemoved, setShowRemoved] = useState(false);
   const [editingDetails] = useState(true);
   const [noteComponentId, setNoteComponentId] = useState<string>();
   const [showExitModal, setShowExitModal] = useState(false);
   const [triedSubmit, setTriedSubmit] = useState(false);
+  const validationSummaryRef = useRef<HTMLDivElement>(null);
+  useBlobUrlCleanup(record.photos);
 
   const [original] = useState<Installation>(() => JSON.parse(JSON.stringify(record)));
   const isDirty = useMemo(() => {
@@ -596,7 +720,7 @@ function InstallationForm({
     return () => setHasUnsavedChanges(false);
   }, [isDirty, setHasUnsavedChanges]);
 
-  const shouldShowExitModal = showExitModal || Boolean(navAttempt);
+  const shouldShowExitModal = showExitModal || Boolean(navAttempt) || Boolean(routeNavAttempt);
 
   const duplicate = record.siteName && records.some((r) => r.siteName.toLowerCase() === record.siteName.toLowerCase() && r.id !== record.id);
   const regionChoices = useLocationChoices("region");
@@ -615,11 +739,29 @@ function InstallationForm({
   const duplicateMac = activeComponents.find((component) => componentMacValues(refs, component).some((mac) => allMacs.filter((value) => value === mac).length > 1 || records.some((installation) => installation.id !== record.id && installation.components.some((existing) => !existing.removedAt && componentMacValues(refs, existing).includes(mac)))));
   const duplicateMacInstallation = duplicateMac && records.find((installation) => installation.id !== record.id && installation.components.some((existing) => !existing.removedAt && componentMacValues(refs, existing).some((mac) => componentMacValues(refs, duplicateMac).includes(mac))));
   const missingComponentValue = activeComponents.some((component) => visibleComponentFields(refs, component).some((field) => field.active && field.required && !(component.values ?? {})[field.id]?.trim()));
+  const hasValidationError = Boolean(duplicate || missingLocation || invalidMac || invalidInteger || missingComponentValue || (duplicateMac && !duplicateMac.duplicateMacAcknowledged));
 
-  function submit(e: FormEvent) { e.preventDefault(); setTriedSubmit(true); if (duplicate || missingLocation || invalidMac || invalidInteger || missingComponentValue || (duplicateMac && !duplicateMac.duplicateMacAcknowledged)) return; onSave({ ...record, components: record.components.map((component) => ({ ...component, values: Object.fromEntries(Object.entries(component.values ?? {}).map(([id, value]) => { const attachment = visibleComponentFields(refs, component).find((field) => field.id === id); return [id, attachment && libraryField(refs, attachment)?.type === "mac" && value ? normalizeMac(value) : value]; })) })), updatedBy: actorName, updatedAt: new Date().toISOString() }); }
+  function showValidationErrors() { setTriedSubmit(true); requestAnimationFrame(() => validationSummaryRef.current?.focus()); }
+  function submit(e: FormEvent) { e.preventDefault(); if (hasValidationError) { showValidationErrors(); return; } onSave({ ...record, components: record.components.map((component) => ({ ...component, values: Object.fromEntries(Object.entries(component.values ?? {}).map(([id, value]) => { const attachment = visibleComponentFields(refs, component).find((field) => field.id === id); return [id, attachment && libraryField(refs, attachment)?.type === "mac" && value ? normalizeMac(value) : value]; })) })), updatedBy: actorName, updatedAt: new Date().toISOString() }); }
   function addComponent() { patch({ components: [...record.components, { id: uid("CMP"), type: refs.componentTypes.find((x) => x.active)?.name ?? "", values: {}, notes: "", installedAt: new Date().toISOString() }] }); }
   function componentPatch(id: string, data: Partial<Component>) { patch({ components: record.components.map((c) => c.id === id ? { ...c, ...data } : c) }); }
   function photos(e: ChangeEvent<HTMLInputElement>) { const files = Array.from(e.target.files ?? []).slice(0, 4); patch({ photos: [...record.photos, ...files.map((file) => ({ name: file.name, url: URL.createObjectURL(file) }))] }); }
+  async function openAudit() {
+    setTab("audit");
+    if (auditLoaded || auditLoading || !record.dbId || !fetchAuditEvents) return;
+    setAuditLoading(true); setAuditError("");
+    try { setAuditEvents(await fetchAuditEvents(record.dbId)); setAuditLoaded(true); }
+    catch (error) { setAuditError(error instanceof Error ? error.message : "Unable to load the change log."); }
+    finally { setAuditLoading(false); }
+  }
+  async function openVisits() {
+    setTab("visits");
+    if (visitsLoaded || visitsLoading || !record.dbId || !fetchServiceVisits) return;
+    setVisitsLoading(true); setVisitsError("");
+    try { setServiceVisits(await fetchServiceVisits(record.dbId)); setVisitsLoaded(true); }
+    catch (error) { setVisitsError(error instanceof Error ? error.message : "Unable to load service visits."); }
+    finally { setVisitsLoading(false); }
+  }
 
   function handleDiscard() {
     setShowExitModal(false);
@@ -634,19 +776,16 @@ function InstallationForm({
   }
 
   function handleSaveAndExit() {
-    setTriedSubmit(true);
-    if (duplicate || missingLocation || invalidMac || invalidInteger || missingComponentValue || (duplicateMac && !duplicateMac.duplicateMacAcknowledged)) {
-      alert("Please fix form validation errors before saving.");
-      return;
-    }
+    if (hasValidationError) { setShowExitModal(false); showValidationErrors(); return; }
     setShowExitModal(false);
     onSave({ ...record, components: record.components.map((component) => ({ ...component, values: Object.fromEntries(Object.entries(component.values ?? {}).map(([id, value]) => { const attachment = visibleComponentFields(refs, component).find((field) => field.id === id); return [id, attachment && libraryField(refs, attachment)?.type === "mac" && value ? normalizeMac(value) : value]; })) })), updatedBy: actorName, updatedAt: new Date().toISOString() });
   }
 
   return <form onSubmit={submit}>
-    <div className="page-head site-record-head"><div><p className="eyebrow">{initial ? "Site record" : "New site"}</p><div className="site-record-heading-row"><h1>{initial ? initial.siteName || "Site name required" : "Add a site record"}</h1>{initial && <StatusPill status={record.status} />}</div>{initial && <div className="small muted record-id">Installation ID: {initial.id}</div>}<p className="muted site-record-description">{initial ? "Update site details and deployed equipment." : "Review site details, contractor visits, and change history."}</p></div><div className="toolbar site-record-actions"><button type="button" className="button" onClick={() => { if (isDirty) { setShowExitModal(true); } else { onCancel(); } }}>{initial ? "Back to sites" : "Cancel"}</button><button className="button primary">{initial ? "Save changes" : "Save site"}</button></div></div>
-    <div className="tabs" role="tablist" aria-label="Site record sections"><button type="button" role="tab" aria-selected={tab === "overview"} className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}>Overview</button><button type="button" role="tab" aria-selected={tab === "visits"} className={tab === "visits" ? "active" : ""} onClick={() => setTab("visits")}>Service visits <span>{record.serviceVisits.length}</span></button><button type="button" role="tab" aria-selected={tab === "audit"} className={tab === "audit" ? "active" : ""} onClick={() => setTab("audit")}>Change log <span>{record.auditEvents.length}</span></button></div>
-    {tab === "overview" && <fieldset className="panel site-fields editing" role="tabpanel">
+    <div className="page-head site-record-head"><div><p className="eyebrow">{initial ? "Site record" : "New site"}</p><div className="site-record-heading-row"><h1>{initial ? initial.siteName || "Site name required" : "Add a site record"}</h1>{initial && <StatusPill status={record.status} />}</div>{initial && <div className="small muted record-id">Installation ID: {initial.id}</div>}<p className="muted site-record-description">{initial ? readOnly ? "Review site details, contractor visits, and change history." : "Update site details and deployed equipment." : "Review site details, contractor visits, and change history."}</p></div><div className="toolbar site-record-actions"><button type="button" className="button" onClick={() => { if (isDirty) { setShowExitModal(true); } else { onCancel(); } }}>{initial ? "Back to sites" : "Cancel"}</button>{!readOnly && <button className="button primary">{initial ? "Save changes" : "Save site"}</button>}</div></div>
+    <div className="tabs" role="tablist" aria-label="Site record sections" onKeyDown={handleTabKeyDown}><button type="button" id="site-tab-overview" role="tab" aria-controls="site-panel-overview" aria-selected={tab === "overview"} tabIndex={tab === "overview" ? 0 : -1} className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}>Overview</button><button type="button" id="site-tab-visits" role="tab" aria-controls="site-panel-visits" aria-selected={tab === "visits"} tabIndex={tab === "visits" ? 0 : -1} className={tab === "visits" ? "active" : ""} onClick={() => void openVisits()}>Service visits {visitsLoaded && <span>{serviceVisits.length}</span>}</button><button type="button" id="site-tab-audit" role="tab" aria-controls="site-panel-audit" aria-selected={tab === "audit"} tabIndex={tab === "audit" ? 0 : -1} className={tab === "audit" ? "active" : ""} onClick={() => void openAudit()}>Change log {auditLoaded && <span>{auditEvents.length}</span>}</button></div>
+    {triedSubmit && hasValidationError && <div className="notice validation-notice inline" role="alert" tabIndex={-1} ref={validationSummaryRef}><strong>Check the highlighted site details before saving.</strong> Review the messages below and correct each required value.</div>}
+    {tab === "overview" && <fieldset id="site-panel-overview" aria-labelledby="site-tab-overview" className="panel site-fields editing" role="tabpanel" disabled={readOnly}>
       {initial && <section className="section ownership-grid" aria-label="Saved record metadata"><div><span className="small muted">Created by</span><strong>{record.createdBy}</strong></div><div><span className="small muted">Created</span><strong>{niceDateTime(record.createdAt)}</strong></div><div><span className="small muted">Updated by</span><strong>{record.updatedBy}</strong></div><div><span className="small muted">Last saved</span><strong>{niceDateTime(record.updatedAt)}</strong></div></section>}
       <section id="site-details-section" className="section site-details-polish site-details-guided"><div className="section-title"><div><h2>Site details</h2><span className="small muted">Identity, ownership, and current installation state</span></div></div><div className="grid-3">
         <label>Site name<input required className="field" value={record.siteName} onChange={(e) => patch({ siteName: e.target.value })} placeholder="Workplace site name" /></label>
@@ -673,11 +812,9 @@ function InstallationForm({
       </section>
       <section className="section"><div className="grid-2"><div><div className="section-title"><h2>Remarks</h2></div><textarea className="textarea" rows={5} value={record.remarks} onChange={(e) => patch({ remarks: e.target.value })} placeholder="Activation notes, issue details, or follow-up action" /></div><div><div className="section-title"><h2>Site photos</h2><span className="small muted">Optional, up to 4 images</span></div><label className="dropzone"><ImagePlus size={21} style={{ margin: "auto" }} /><span>Choose site photos</span><input type="file" accept="image/*" multiple hidden onChange={photos} /></label>{record.photos.length > 0 && <p className="small muted">{record.photos.map((p) => p.name).join(", ")}</p>}</div></div></section>
     </fieldset>}
-    {tab === "visits" && <div className="panel" role="tabpanel"><div className="panel-head"><div><h2>Service visits</h2><div className="small muted">Contractor revisits, maintenance, and equipment changes</div></div><button type="button" className="button primary" onClick={() => setVisitOpen(null)}><Plus size={15} />New service visit</button></div><ServiceVisitTable visits={record.serviceVisits.map((visit) => ({ installation: record, visit }))} onSelect={(_, visit) => setVisitOpen(visit)} /></div>}
-    {tab === "audit" && <div className="panel" role="tabpanel"><div className="panel-head"><div><h2>Change log</h2><div className="small muted">Permanent history of record updates and service activity</div></div><History size={18} className="muted" /></div><AuditTimeline events={record.auditEvents} /></div>}
+    {tab === "visits" && <div id="site-panel-visits" aria-labelledby="site-tab-visits" className="panel" role="tabpanel"><div className="panel-head"><div><h2>Service visits</h2><div className="small muted">Contractor revisits, maintenance, and equipment changes</div></div>{!readOnly && <button type="button" className="button primary" onClick={() => navigate(`/service-visits/new?site=${encodeURIComponent(record.id)}&returnTo=${encodeURIComponent(`/sites/${record.id}`)}`)}><Plus size={15} />New service visit</button>}</div>{visitsLoading ? <div className="section muted">Loading service visits...</div> : visitsError ? <div className="section notice validation-notice"><strong>Unable to load service visits.</strong> {visitsError}</div> : <ServiceVisitTable visits={serviceVisits.map((visit) => ({ installation: record, visit }))} onSelect={(_, visit) => navigate(`/service-visits/${encodeURIComponent(visit.id)}?returnTo=${encodeURIComponent(`/sites/${record.id}`)}`)} />}</div>}
+    {tab === "audit" && <div id="site-panel-audit" aria-labelledby="site-tab-audit" className="panel" role="tabpanel"><div className="panel-head"><div><h2>Change log</h2><div className="small muted">Permanent history of record updates and service activity</div></div><History size={18} className="muted" /></div>{auditLoading ? <div className="section muted">Loading change log...</div> : auditError ? <div className="section notice validation-notice"><strong>Unable to load the change log.</strong> {auditError}</div> : <AuditTimeline events={auditEvents} />}</div>}
     {noteComponentId && <ComponentNoteModal component={record.components.find((component) => component.id === noteComponentId)} onChange={(notes) => componentPatch(noteComponentId, { notes })} onClose={() => setNoteComponentId(undefined)} />}
-    {visitOpen !== undefined && <ServiceVisitModal refs={refs} installation={record} visit={visitOpen ?? undefined} actorName={actorName} onClose={() => setVisitOpen(undefined)} onSave={(visit, components) => { const exists = record.serviceVisits.some((item) => item.id === visit.id); const action = exists ? "updated" : "created"; const audit = createAudit(actorName, `service_visit_${action}`, visitAuditSummary(actorName, visit, action), ["serviceVisits"]); patch({ components, serviceVisits: exists ? record.serviceVisits.map((item) => item.id === visit.id ? visit : item) : [visit, ...record.serviceVisits], auditEvents: [audit, ...record.auditEvents] }); setVisitOpen(undefined); }} />}
-
     {shouldShowExitModal && (
       <div className="modal-backdrop" role="presentation">
         <div className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="exit-confirm-title" onClick={(e) => e.stopPropagation()}>
@@ -718,7 +855,8 @@ function ComponentNoteModal({ component, onChange, onClose }: { component?: Comp
 
 function LocationCombobox({ label, placeholder, value, options, loading = false, disabled = false, onSelect }: { label: string; placeholder: string; value: string; options: LocationOption[]; loading?: boolean; disabled?: boolean; onSelect: (option: LocationOption) => void }) {
   const root = useRef<HTMLDivElement>(null);
-  const listId = `${label.toLocaleLowerCase("en-PH").replace(/\s+/g, "-")}-location-options`;
+  const id = useId();
+  const listId = `${id}-location-options`;
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
@@ -727,6 +865,7 @@ function LocationCombobox({ label, placeholder, value, options, loading = false,
     const normalized = query.trim().toLocaleLowerCase("en-PH");
     return normalized ? options.filter((option) => option.name.toLocaleLowerCase("en-PH").includes(normalized)) : options;
   }, [options, query]);
+  const activeOptionId = open && filtered[activeIndex] ? `${id}-location-option-${activeIndex}` : undefined;
   useEffect(() => {
     if (!open) return;
     function close(event: MouseEvent) { if (root.current && !root.current.contains(event.target as Node)) setOpen(false); }
@@ -736,8 +875,8 @@ function LocationCombobox({ label, placeholder, value, options, loading = false,
   function choose(option: LocationOption) { onSelect(option); setQuery(""); setOpen(false); setActiveIndex(0); }
   return <label>{label}<div className="location-combobox" ref={root} style={{ position: "relative" }}>
     <Search className="location-combobox-icon" size={15} style={{ pointerEvents: "none", position: "absolute", zIndex: 2, left: 10, top: 11 }} />
-    <input className="field location-combobox-input" style={{ paddingLeft: 33 }} role="combobox" aria-autocomplete="list" aria-expanded={open} aria-controls={listId} aria-label={`Search ${label.toLowerCase()}`} disabled={disabled || loading} value={open ? query : selected?.name ?? ""} placeholder={loading ? `Loading ${label.toLowerCase()}s...` : placeholder} onFocus={() => { setQuery(""); setOpen(true); setActiveIndex(0); }} onBlur={() => window.setTimeout(() => { if (root.current && !root.current.contains(document.activeElement)) setOpen(false); }, 0)} onChange={(event) => { setQuery(event.target.value); setOpen(true); setActiveIndex(0); }} onKeyDown={(event) => { if (event.key === "Escape") { setOpen(false); return; } if (event.key === "ArrowDown") { event.preventDefault(); setOpen(true); setActiveIndex((index) => Math.min(index + 1, Math.max(filtered.length - 1, 0))); } if (event.key === "ArrowUp") { event.preventDefault(); setActiveIndex((index) => Math.max(index - 1, 0)); } if (event.key === "Enter" && open && filtered[activeIndex]) { event.preventDefault(); choose(filtered[activeIndex]); } }} />
-    {open && !disabled && !loading && <div className="location-combobox-options" id={listId} role="listbox" aria-label={`${label} options`} style={{ position: "absolute", zIndex: 15, top: "calc(100% + 5px)", left: 0, right: 0, maxHeight: 230, overflowY: "auto", padding: 4, border: "1px solid var(--line)", borderRadius: 8, background: "var(--surface)", boxShadow: "0 8px 16px oklch(0.25 0.03 158 / .12)" }}>{filtered.length ? filtered.map((option, index) => <button type="button" className={`location-combobox-option ${index === activeIndex ? "active" : ""}`} role="option" aria-selected={option.code === value} key={option.code} style={{ display: "block", width: "100%", border: 0, borderRadius: 6, padding: "8px 9px", textAlign: "left" }} onMouseEnter={() => setActiveIndex(index)} onClick={() => choose(option)}>{option.name}</button>) : <div className="location-combobox-empty">No matching {label.toLowerCase()}.</div>}</div>}
+    <input className="field location-combobox-input" style={{ paddingLeft: 33 }} role="combobox" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded={open} aria-controls={listId} aria-activedescendant={activeOptionId} aria-label={`Search ${label.toLowerCase()}`} disabled={disabled || loading} value={open ? query : selected?.name ?? ""} placeholder={loading ? `Loading ${label.toLowerCase()}s...` : placeholder} onFocus={() => { setQuery(""); setOpen(true); setActiveIndex(0); }} onBlur={() => window.setTimeout(() => { if (root.current && !root.current.contains(document.activeElement)) setOpen(false); }, 0)} onChange={(event) => { setQuery(event.target.value); setOpen(true); setActiveIndex(0); }} onKeyDown={(event) => { if (event.key === "Escape") { setOpen(false); return; } if (event.key === "ArrowDown") { event.preventDefault(); setActiveIndex((index) => open ? Math.min(index + 1, Math.max(filtered.length - 1, 0)) : 0); setOpen(true); } if (event.key === "ArrowUp") { event.preventDefault(); setActiveIndex((index) => open ? Math.max(index - 1, 0) : Math.max(filtered.length - 1, 0)); setOpen(true); } if (event.key === "Enter" && open && filtered[activeIndex]) { event.preventDefault(); choose(filtered[activeIndex]); } }} />
+    {open && !disabled && !loading && <div className="location-combobox-options" id={listId} role="listbox" aria-label={`${label} options`} style={{ position: "absolute", zIndex: 15, top: "calc(100% + 5px)", left: 0, right: 0, maxHeight: 230, overflowY: "auto", padding: 4, border: "1px solid var(--line)", borderRadius: 8, background: "var(--surface)", boxShadow: "0 8px 16px oklch(0.25 0.03 158 / .12)" }}>{filtered.length ? filtered.map((option, index) => <button type="button" className={`location-combobox-option ${index === activeIndex ? "active" : ""}`} id={`${id}-location-option-${index}`} role="option" aria-selected={option.code === value} tabIndex={-1} key={option.code} style={{ display: "block", width: "100%", border: 0, borderRadius: 6, padding: "8px 9px", textAlign: "left" }} onMouseEnter={() => setActiveIndex(index)} onClick={() => choose(option)}>{option.name}</button>) : <div className="location-combobox-empty">No matching {label.toLowerCase()}.</div>}</div>}
   </div></label>;
 }
 
@@ -768,7 +907,7 @@ function ImportRecords({ refs, records, notify, onSaved }: { refs: ReferenceData
   const [filename, setFilename] = useState("");
   const [saving, setSaving] = useState(false);
   async function downloadTemplate() {
-    const wb = new ExcelJS.Workbook();
+    const wb = await createWorkbook();
     const customFields = (refs.customFields ?? []).filter((field) => field.active).sort((a, b) => a.order - b.order);
     const componentLabels = Array.from(new Set(refs.componentTypes.flatMap((type) => (type.fields ?? []).filter((field) => field.active).map((field) => libraryField(refs, field)?.label).filter(Boolean) as string[])));
     wb.addWorksheet("Installations").addRows([["External Ref", "Site Name", "Solution", "Contractor", "Install Date", "Status", "Island Group", "Region", "Region Code", "Province", "Province Code", "Locality", "Locality Code", "Barangay", "Barangay Code", "Address", "Remarks", ...customFields.map((field) => field.label)], ["ROW-001", "Cebu Hub 01", "Satellite broadband", refs.contractors.find((x) => x.active)?.name ?? "", today(), "installed", "Visayas", "Region VII (Central Visayas)", "0700000000", "Cebu", "0730600000", "Cebu City", "30600", "Lahug", "0730600041", "", "", ...customFields.map(() => "")]]);
@@ -788,14 +927,14 @@ function ImportRecords({ refs, records, notify, onSaved }: { refs: ReferenceData
       ["Custom site fields", "Type or allowed choices"],
       ...customFields.map((field) => [`${field.label}${field.required ? " (required)" : ""}`, field.type === "dropdown" ? field.options.filter((option) => option.active).map((option) => option.name).join(", ") : field.type]),
     ]);
-    const buffer = await wb.xlsx.writeBuffer(); const link = document.createElement("a");
-    link.href = URL.createObjectURL(new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })); link.download = "fieldtrack-import-template.xlsx"; link.click();
+    const buffer = await wb.xlsx.writeBuffer();
+    downloadBlob(new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), "fieldtrack-import-template.xlsx");
   }
   async function load(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]; if (!file) return;
     setFilename(file.name);
     const { resolveLocation } = await import("@/lib/locations");
-    const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await file.arrayBuffer()); const sheet = wb.getWorksheet("Installations") ?? wb.worksheets[0];
+    const wb = await createWorkbook(); await wb.xlsx.load(await file.arrayBuffer()); const sheet = wb.getWorksheet("Installations") ?? wb.worksheets[0];
     const headers = (sheet.getRow(1).values as string[]).slice(1).map(String);
     const data: Record<string, string>[] = [];
     sheet.eachRow((row, rowNumber) => { if (rowNumber > 1) { const values = (row.values as string[]).slice(1); data.push(Object.fromEntries(headers.map((header, i) => [header, String(values[i] ?? "")]))); } });
@@ -828,6 +967,10 @@ function ImportRecords({ refs, records, notify, onSaved }: { refs: ReferenceData
 
 type SettingsSection = "users" | "contractors" | "unitTypes" | "componentTypes" | "customFields" | "serviceVisitTypes";
 type ReferenceSettingsSection = Exclude<SettingsSection, "customFields" | "users">;
+const settingsPaths: Record<SettingsSection, string> = { users: "/admin/users", contractors: "/admin/contractors", unitTypes: "/admin/solutions", componentTypes: "/admin/component-types", customFields: "/admin/custom-fields", serviceVisitTypes: "/admin/service-visit-types" };
+function settingsSectionFromPathname(pathname: string): SettingsSection {
+  return (Object.entries(settingsPaths).find(([, path]) => path === pathname)?.[0] as SettingsSection | undefined) ?? "contractors";
+}
 const settingsSections = [["users", Users, "Users"], ["contractors", Users, "Contractors"], ["unitTypes", Package, "Solutions"], ["componentTypes", CircleDot, "Component types"], ["customFields", ClipboardList, "Custom installation fields"], ["serviceVisitTypes", Wrench, "Service visit types"]] as const;
 function orderedSettings<T extends { order?: number }>(items: T[]) { return [...items].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)); }
 function reorderSettings<T extends { id: string; order?: number }>(items: T[], sourceId: string, targetId: string) { const ordered = orderedSettings(items); const moved = ordered.find((item) => item.id === sourceId); if (!moved || sourceId === targetId) return ordered; const reordered = ordered.filter((item) => item.id !== sourceId); const targetIndex = reordered.findIndex((item) => item.id === targetId); reordered.splice(targetIndex, 0, moved); return reordered.map((item, order) => ({ ...item, order })); }
@@ -841,8 +984,13 @@ function NameEditorModal({ title, label, initialValue = "", existingNames = [], 
   useEscape(onClose);
   return <div className="modal-backdrop" role="presentation"><form className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="name-editor-title" onSubmit={(event) => { event.preventDefault(); const next = value.trim(); if (!next) { setMessage(`Enter a ${label.toLowerCase()}.`); return; } if (existingNames.some((name) => name.localeCompare(next, undefined, { sensitivity: "base" }) === 0)) { setMessage(`${next} already exists.`); return; } onSave(next); }}><div className="modal-header"><div><h2 id="name-editor-title">{title}</h2><p className="muted">Use a clear, unique name for staff records and reports.</p></div><button type="button" className="button icon-button ghost" aria-label="Close editor" onClick={onClose}><X size={17} /></button></div><label>{label}<input autoFocus className="field" value={value} onChange={(event) => setValue(event.target.value)} /></label>{message && <div className="notice validation-notice inline" role="alert">{message}</div>}<div className="modal-actions"><button type="button" className="button" onClick={onClose}>Cancel</button><button className="button primary">Save name</button></div></form></div>;
 }
+function RowActionMenu({ label, children }: { label: string; children: React.ReactNode }) {
+  return <details className="row-action-menu"><summary className="button icon-button ghost" aria-label={label} title={label}><MoreHorizontal size={16} /></summary><div className="row-action-menu-panel" onClick={(event) => { if ((event.target as HTMLElement).closest("button")) event.currentTarget.parentElement?.removeAttribute("open"); }}>{children}</div></details>;
+}
 function SettingsPage({ refs, setRefs, records, profile, referenceSaveState, referenceSaveError, hasUnsavedReferences, saveReferences, discardReferences, refreshWorkspace, deleteComponentType, deleteEquipmentField, notify }: { refs: ReferenceData; setRefs: Dispatch<SetStateAction<ReferenceData>>; records: Installation[]; profile: Profile; referenceSaveState: ReferenceSaveState; referenceSaveError: string; hasUnsavedReferences: boolean; saveReferences: () => Promise<boolean>; discardReferences: () => void; refreshWorkspace: () => Promise<void>; deleteComponentType: (type: ComponentTypeOption) => void; deleteEquipmentField: (field: EquipmentFieldLibraryItem) => Promise<boolean>; notify: (s: string) => void }) {
-  const [section, setSection] = useState<SettingsSection>("contractors"); const [name, setName] = useState("");
+  const pathname = usePathname();
+  const navigate = useGuardedNavigation();
+  const [section, setSection] = useState<SettingsSection>(() => settingsSectionFromPathname(pathname)); const [name, setName] = useState("");
   const [selectedComponentId, setSelectedComponentId] = useState(refs.componentTypes[0]?.id ?? "");
   const [fieldType, setFieldType] = useState<CustomFieldType>("text"); const [required, setRequired] = useState(false);
   const [deletingReference, setDeletingReference] = useState<{ section: "contractors" | "unitTypes"; option: ReferenceOption }>();
@@ -867,17 +1015,18 @@ function SettingsPage({ refs, setRefs, records, profile, referenceSaveState, ref
   async function deleteCustomField(field: CustomFieldDefinition) { if (hasUnsavedReferences) { setDeletingCustomField(undefined); notify("Save or discard your pending settings changes before deleting a custom field."); return; } try { await deleteReferencePermanently("customField", field.id); await refreshWorkspace(); setDeletingCustomField(undefined); notify(`${field.label} was deleted.`); } catch (error) { notify(error instanceof Error ? error.message : "Unable to delete custom field."); } }
   const selectedComponent = refs.componentTypes.find((item) => item.id === selectedComponentId) ?? refs.componentTypes[0];
   const addLabel = section === "contractors" ? "Add contractor" : section === "unitTypes" ? "Add solution" : section === "componentTypes" ? "Add component type" : section === "serviceVisitTypes" ? "Add visit type" : "Add field";
-  function requestSection(next: SettingsSection) { if (next === section) return; if (hasUnsavedReferences) setPendingSection(next); else setSection(next); }
+  function openSection(next: SettingsSection) { setSection(next); navigate(settingsPaths[next], { bypassGuard: true }); }
+  function requestSection(next: SettingsSection) { if (next === section) return; if (hasUnsavedReferences) setPendingSection(next); else openSection(next); }
   return <>
     <div className="page-head"><div><p className="eyebrow">Administration</p><h1>Reference settings</h1><p className="muted">Maintain the choices available in site records and reports.</p></div><ReferenceSaveStatus state={referenceSaveState} dirty={hasUnsavedReferences} error={referenceSaveError} onRetry={() => void saveReferences()} /></div>
     <div className="settings-layout"><div className="panel settings-nav-panel"><div className="panel-head"><h2>Settings sections</h2></div><label className="settings-mobile-select">Settings section<select className="select" value={section} onChange={(event) => requestSection(event.target.value as SettingsSection)}>{settingsSections.map(([id, , label]) => <option value={id} key={id}>{label}</option>)}</select></label><div className="nav settings-section-tabs">{settingsSections.map(([id, Icon, label]) => <button key={id} onClick={() => requestSection(id)} className={section === id ? "active" : ""}><Icon size={16} />{label}</button>)}</div><div className="section small muted settings-audit-note"><Activity size={16} style={{ marginBottom: 8 }} />Deactivated values remain on historical records. Admin changes are recorded in the production audit log.</div></div>
-    <div className="panel settings-editor"><div className="panel-head"><h2>{settingsSectionLabel(section)}</h2>{section !== "users" && <div className="toolbar"><button type="button" className="button" disabled={!hasUnsavedReferences || referenceSaveState === "saving"} onClick={discardReferences}>Discard changes</button><button type="button" className="button primary" disabled={!hasUnsavedReferences || referenceSaveState === "saving"} onClick={() => void saveReferences()}>{referenceSaveState === "saving" ? "Saving..." : "Save changes"}</button></div>}</div>
-      {section === "users" ? <><div className="section immediate-settings-note"><strong>User access changes apply immediately.</strong><div className="small muted">Role changes, activation updates, and password resets take effect after confirmation.</div></div><UsersSettings currentProfile={profile} notify={notify} /></> : section === "customFields" ? orderedSettings(refs.customFields ?? []).map((field) => <CustomFieldSettings key={field.id} field={field} otherFieldNames={(refs.customFields ?? []).filter((item) => item.id !== field.id).map((item) => item.label)} dragging={draggedSetting?.section === "customFields" && draggedSetting.id === field.id} deleteDisabled={hasUnsavedReferences} onDragStart={() => setDraggedSetting({ section: "customFields", id: field.id })} onDragEnter={() => { if (draggedSetting?.section === "customFields") reorderCustomField(draggedSetting.id, field.id); }} onKeyboardMove={(direction) => moveSettingWithKeyboard("customFields", field.id, direction)} patchField={patchField} moveField={moveField} deleteField={() => setDeletingCustomField(field)} />) : section === "componentTypes" ? <div className="component-settings-layout"><div className="component-type-list">{orderedSettings(refs.componentTypes).map((item) => <div className={`component-type-list-row ${draggedSetting?.section === "componentTypes" && draggedSetting.id === item.id ? "dragging" : ""}`} key={item.id} onPointerEnter={() => { if (draggedSetting?.section === "componentTypes") reorderReference("componentTypes", draggedSetting.id, item.id); }}><ReorderHandle label={item.name} onPointerDown={() => setDraggedSetting({ section: "componentTypes", id: item.id })} onKeyDown={(direction) => moveSettingWithKeyboard("componentTypes", item.id, direction)} /><button type="button" className={item.id === selectedComponent?.id ? "selected" : ""} onClick={() => setSelectedComponentId(item.id)}><strong>{item.name}</strong><span>{item.fields.length} fields | {records.reduce((count, record) => count + record.components.filter((component) => component.type === item.name).length, 0)} installed</span></button></div>)}</div>{selectedComponent && <div className="component-type-editor"><ComponentTypeSettings key={selectedComponent.id} componentType={selectedComponent} equipmentFields={refs.equipmentFields ?? []} otherTypeNames={refs.componentTypes.filter((item) => item.id !== selectedComponent.id).map((item) => item.name)} equipmentFieldUsage={(libraryFieldId) => { const fieldIds = new Set(refs.componentTypes.flatMap((type) => type.fields.filter((field) => field.libraryFieldId === libraryFieldId).map((field) => field.id))); return { attachmentCount: fieldIds.size, savedValueCount: records.reduce((count, record) => count + record.components.reduce((subtotal, component) => subtotal + Object.keys(component.values ?? {}).filter((id) => fieldIds.has(id)).length, 0), 0) }; }} createEquipmentField={(field) => setRefs((current) => ({ ...current, equipmentFields: [...(current.equipmentFields ?? []), field] }))} deleteDisabled={hasUnsavedReferences} deleteEquipmentField={deleteEquipmentField} usageCount={records.reduce((count, record) => count + record.components.filter((component) => component.type === selectedComponent.name).length, 0)} deleteType={() => deleteComponentType(selectedComponent)} patchType={(data) => setRefs((current) => ({ ...current, componentTypes: current.componentTypes.map((type) => type.id === selectedComponent.id ? { ...type, ...data } : type) }))} renameType={(next) => setRefs((current) => ({ ...current, componentTypes: current.componentTypes.map((type) => type.id === selectedComponent.id ? { ...type, name: next } : type) }))} notify={notify} /></div>}</div> : orderedSettings(refs[section]).map((item) => <div className={`section settings-row reference-settings-row ${draggedSetting?.section === section && draggedSetting.id === item.id ? "dragging" : ""}`} key={item.id} onPointerEnter={() => { if (draggedSetting?.section === section) reorderReference(section, draggedSetting.id, item.id); }}><ReorderHandle label={item.name} onPointerDown={() => setDraggedSetting({ section, id: item.id })} onKeyDown={(direction) => moveSettingWithKeyboard(section, item.id, direction)} /><div className="reference-settings-copy"><strong>{item.name}</strong><div className="small muted">{item.active ? "Available for new records" : "Hidden from new records"}</div></div><div className="toolbar"><button type="button" className="button icon-button" aria-label={`Rename ${item.name}`} title="Rename" onClick={() => renameOption(section, item)}><Pencil size={15} /></button><button type="button" className={`button icon-button ${item.active ? "danger" : ""}`} aria-label={`${item.active ? "Deactivate" : "Reactivate"} ${item.name}`} title={item.active ? "Deactivate" : "Reactivate"} onClick={() => { patchOption(section, item.id, { active: !item.active }); notify(item.active ? "Setting deactivated. Save changes to apply." : "Setting reactivated. Save changes to apply."); }}><Power size={15} /></button>{section !== "serviceVisitTypes" && <button type="button" className="button icon-button danger" aria-label={`Delete ${item.name} permanently`} title={hasUnsavedReferences ? "Save or discard changes before deleting permanently" : "Delete permanently"} disabled={hasUnsavedReferences} onClick={() => setDeletingReference({ section, option: item })}><Trash2 size={15} /></button>}</div></div>)}
+    <div className="panel settings-editor"><div className="panel-head settings-editor-head"><h2>{settingsSectionLabel(section)}</h2>{section !== "users" && <div className="toolbar"><button type="button" className="button" disabled={!hasUnsavedReferences || referenceSaveState === "saving"} onClick={discardReferences}>Discard changes</button><button type="button" className="button primary" disabled={!hasUnsavedReferences || referenceSaveState === "saving"} onClick={() => void saveReferences()}>{referenceSaveState === "saving" ? "Saving..." : "Save changes"}</button></div>}</div>
+      {section === "users" ? <><div className="section immediate-settings-note"><strong>User access changes apply immediately.</strong><div className="small muted">Role changes, activation updates, and password resets take effect after confirmation.</div></div><UsersSettings currentProfile={profile} notify={notify} /></> : section === "customFields" ? orderedSettings(refs.customFields ?? []).map((field) => <CustomFieldSettings key={field.id} field={field} otherFieldNames={(refs.customFields ?? []).filter((item) => item.id !== field.id).map((item) => item.label)} dragging={draggedSetting?.section === "customFields" && draggedSetting.id === field.id} deleteDisabled={hasUnsavedReferences} onDragStart={() => setDraggedSetting({ section: "customFields", id: field.id })} onDragEnter={() => { if (draggedSetting?.section === "customFields") reorderCustomField(draggedSetting.id, field.id); }} onKeyboardMove={(direction) => moveSettingWithKeyboard("customFields", field.id, direction)} patchField={patchField} moveField={moveField} deleteField={() => setDeletingCustomField(field)} />) : section === "componentTypes" ? <div className="component-settings-layout"><div className="component-type-list">{orderedSettings(refs.componentTypes).map((item) => <div className={`component-type-list-row ${draggedSetting?.section === "componentTypes" && draggedSetting.id === item.id ? "dragging" : ""}`} key={item.id} onPointerEnter={() => { if (draggedSetting?.section === "componentTypes") reorderReference("componentTypes", draggedSetting.id, item.id); }}><ReorderHandle label={item.name} onPointerDown={() => setDraggedSetting({ section: "componentTypes", id: item.id })} onKeyDown={(direction) => moveSettingWithKeyboard("componentTypes", item.id, direction)} /><button type="button" className={item.id === selectedComponent?.id ? "selected" : ""} onClick={() => setSelectedComponentId(item.id)}><strong>{item.name}</strong><span>{item.fields.length} fields | {records.reduce((count, record) => count + record.components.filter((component) => component.type === item.name).length, 0)} installed</span></button></div>)}</div>{selectedComponent && <div className="component-type-editor"><ComponentTypeSettings key={selectedComponent.id} componentType={selectedComponent} equipmentFields={refs.equipmentFields ?? []} otherTypeNames={refs.componentTypes.filter((item) => item.id !== selectedComponent.id).map((item) => item.name)} equipmentFieldUsage={(libraryFieldId) => { const fieldIds = new Set(refs.componentTypes.flatMap((type) => type.fields.filter((field) => field.libraryFieldId === libraryFieldId).map((field) => field.id))); return { attachmentCount: fieldIds.size, savedValueCount: records.reduce((count, record) => count + record.components.reduce((subtotal, component) => subtotal + Object.keys(component.values ?? {}).filter((id) => fieldIds.has(id)).length, 0), 0) }; }} createEquipmentField={(field) => setRefs((current) => ({ ...current, equipmentFields: [...(current.equipmentFields ?? []), field] }))} deleteDisabled={hasUnsavedReferences} deleteEquipmentField={deleteEquipmentField} usageCount={records.reduce((count, record) => count + record.components.filter((component) => component.type === selectedComponent.name).length, 0)} deleteType={() => deleteComponentType(selectedComponent)} patchType={(data) => setRefs((current) => ({ ...current, componentTypes: current.componentTypes.map((type) => type.id === selectedComponent.id ? { ...type, ...data } : type) }))} renameType={(next) => setRefs((current) => ({ ...current, componentTypes: current.componentTypes.map((type) => type.id === selectedComponent.id ? { ...type, name: next } : type) }))} notify={notify} /></div>}</div> : orderedSettings(refs[section]).map((item) => <div className={`section settings-row reference-settings-row ${draggedSetting?.section === section && draggedSetting.id === item.id ? "dragging" : ""}`} key={item.id} onPointerEnter={() => { if (draggedSetting?.section === section) reorderReference(section, draggedSetting.id, item.id); }}><ReorderHandle label={item.name} onPointerDown={() => setDraggedSetting({ section, id: item.id })} onKeyDown={(direction) => moveSettingWithKeyboard(section, item.id, direction)} /><div className="reference-settings-copy"><strong>{item.name}</strong><div className="small muted">{item.active ? "Available for new records" : "Hidden from new records"}</div></div><RowActionMenu label={`Actions for ${item.name}`}><button type="button" onClick={() => renameOption(section, item)}><Pencil size={15} />Rename</button><button type="button" className={item.active ? "danger" : ""} onClick={() => { patchOption(section, item.id, { active: !item.active }); notify(item.active ? "Setting deactivated. Save changes to apply." : "Setting reactivated. Save changes to apply."); }}><Power size={15} />{item.active ? "Deactivate" : "Reactivate"}</button>{section !== "serviceVisitTypes" && <button type="button" className="danger" disabled={hasUnsavedReferences} title={hasUnsavedReferences ? "Save or discard changes before deleting permanently" : undefined} onClick={() => setDeletingReference({ section, option: item })}><Trash2 size={15} />Delete permanently</button>}</RowActionMenu></div>)}
       {section !== "users" && <form className="section toolbar" onSubmit={add}><input className="field" style={{ maxWidth: 280 }} value={name} onChange={(e) => setName(e.target.value)} placeholder={section === "customFields" ? "New field label" : "Add approved value"} />{section === "customFields" && <><select className="select" value={fieldType} onChange={(e) => setFieldType(e.target.value as CustomFieldType)}><option value="text">Text</option><option value="number">Number</option><option value="date">Date</option><option value="dropdown">Dropdown</option></select><label style={{ display: "flex", alignItems: "center", gap: 6 }}><input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)} />Required</label></>}<button className="button primary"><Plus size={15} />{addLabel}</button></form>}</div></div>
     {renamingReference && <NameEditorModal title={`Rename ${settingsSectionLabel(renamingReference.section).toLowerCase()}`} label="Name" initialValue={renamingReference.option.name} existingNames={refs[renamingReference.section].filter((item) => item.id !== renamingReference.option.id).map((item) => item.name)} onClose={() => setRenamingReference(undefined)} onSave={(next) => { patchOption(renamingReference.section, renamingReference.option.id, { name: next }); setRenamingReference(undefined); }} />}
     {deletingReference && <div className="modal-backdrop" role="presentation"><div className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="delete-reference"><div className="modal-icon"><AlertTriangle size={20} /></div><h2 id="delete-reference">{referenceUsage(deletingReference.section, deletingReference.option) ? `Cannot delete ${deletingReference.option.name}` : `Delete ${deletingReference.option.name} permanently?`}</h2><p className="muted">{referenceUsage(deletingReference.section, deletingReference.option) ? `This value is used by ${referenceUsage(deletingReference.section, deletingReference.option)} site records. Deactivate it instead so existing records remain accurate.` : "This removes the choice permanently. This cannot be undone."}</p><div className="modal-actions"><button type="button" className="button" onClick={() => setDeletingReference(undefined)}>{referenceUsage(deletingReference.section, deletingReference.option) ? "Close" : "Cancel"}</button>{!referenceUsage(deletingReference.section, deletingReference.option) && <button type="button" className="button danger-solid" onClick={() => deleteReference(deletingReference.section, deletingReference.option)}><Trash2 size={15} />Delete permanently</button>}</div></div></div>}
     {deletingCustomField && <div className="modal-backdrop" role="presentation"><div className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="delete-custom-field"><div className="modal-icon"><AlertTriangle size={20} /></div><h2 id="delete-custom-field">Delete {deletingCustomField.label} permanently?</h2><p className="muted">This cannot be undone. Deleting this custom field removes {customFieldUsage(deletingCustomField)} saved site values and any configured dropdown choices.</p><div className="modal-actions"><button type="button" className="button" onClick={() => setDeletingCustomField(undefined)}>Cancel</button><button type="button" className="button danger-solid" onClick={() => deleteCustomField(deletingCustomField)}><Trash2 size={15} />Delete permanently</button></div></div></div>}
-    {pendingSection && <div className="modal-backdrop" role="presentation"><div className="modal-panel" role="alertdialog" aria-modal="true" aria-labelledby="discard-settings-section"><div className="modal-icon"><AlertTriangle size={20} /></div><h2 id="discard-settings-section">Leave without saving changes?</h2><p className="muted">Your unsaved updates in {settingsSectionLabel(section).toLowerCase()} will be discarded before opening {settingsSectionLabel(pendingSection).toLowerCase()}.</p><div className="modal-actions"><button type="button" className="button" onClick={() => setPendingSection(undefined)}>Keep editing</button><button type="button" className="button danger-solid" onClick={() => { discardReferences(); setSection(pendingSection); setPendingSection(undefined); }}>Discard changes</button><button type="button" className="button primary" onClick={async () => { if (await saveReferences()) { setSection(pendingSection); setPendingSection(undefined); } }}>Save and continue</button></div></div></div>}
+    {pendingSection && <div className="modal-backdrop" role="presentation"><div className="modal-panel" role="alertdialog" aria-modal="true" aria-labelledby="discard-settings-section"><div className="modal-icon"><AlertTriangle size={20} /></div><h2 id="discard-settings-section">Leave without saving changes?</h2><p className="muted">Your unsaved updates in {settingsSectionLabel(section).toLowerCase()} will be discarded before opening {settingsSectionLabel(pendingSection).toLowerCase()}.</p><div className="modal-actions"><button type="button" className="button" onClick={() => setPendingSection(undefined)}>Keep editing</button><button type="button" className="button danger-solid" onClick={() => { discardReferences(); openSection(pendingSection); setPendingSection(undefined); }}>Discard changes</button><button type="button" className="button primary" onClick={async () => { if (await saveReferences()) { openSection(pendingSection); setPendingSection(undefined); } }}>Save and continue</button></div></div></div>}
   </>;
 }
 
@@ -885,9 +1034,9 @@ function CustomFieldSettings({ field, otherFieldNames, dragging, deleteDisabled,
   const [editor, setEditor] = useState<{ kind: "field" | "addOption" | "option"; option?: ReferenceOption }>();
   function patchDropdownOption(id: string, data: Partial<ReferenceOption>) { patchField(field.id, { options: field.options.map((option) => option.id === id ? { ...option, ...data } : option) }); }
   return <div className="section">
-    <div className={`settings-row reference-settings-row ${dragging ? "dragging" : ""}`} onPointerEnter={onDragEnter}><ReorderHandle label={field.label} onPointerDown={onDragStart} onKeyDown={onKeyboardMove} /><div className="reference-settings-copy"><strong>{field.label}</strong><div className="small muted">{field.type}{field.required ? " | required" : " | optional"}{field.active ? "" : " | inactive"}</div></div><div className="toolbar"><button type="button" className="button icon-button" aria-label={`Move ${field.label} up`} title="Move up" onClick={() => moveField(field, -1)}><ArrowUp size={15} /></button><button type="button" className="button icon-button" aria-label={`Move ${field.label} down`} title="Move down" onClick={() => moveField(field, 1)}><ArrowDown size={15} /></button><button type="button" className="button icon-button" aria-label={`Rename ${field.label}`} title="Rename" onClick={() => setEditor({ kind: "field" })}><Pencil size={15} /></button><button type="button" className={`button icon-button ${field.active ? "danger" : ""}`} aria-label={`${field.active ? "Deactivate" : "Reactivate"} ${field.label}`} title={field.active ? "Deactivate" : "Reactivate"} onClick={() => patchField(field.id, { active: !field.active })}><Power size={15} /></button><button type="button" className="button icon-button danger" aria-label={`Delete ${field.label} permanently`} title={deleteDisabled ? "Save or discard changes before deleting permanently" : "Delete permanently"} disabled={deleteDisabled} onClick={deleteField}><Trash2 size={15} /></button></div></div>
+    <div className={`settings-row reference-settings-row ${dragging ? "dragging" : ""}`} onPointerEnter={onDragEnter}><ReorderHandle label={field.label} onPointerDown={onDragStart} onKeyDown={onKeyboardMove} /><div className="reference-settings-copy"><strong>{field.label}</strong><div className="small muted">{field.type}{field.required ? " | required" : " | optional"}{field.active ? "" : " | inactive"}</div></div><RowActionMenu label={`Actions for ${field.label}`}><button type="button" onClick={() => moveField(field, -1)}><ArrowUp size={15} />Move up</button><button type="button" onClick={() => moveField(field, 1)}><ArrowDown size={15} />Move down</button><button type="button" onClick={() => setEditor({ kind: "field" })}><Pencil size={15} />Rename</button><button type="button" className={field.active ? "danger" : ""} onClick={() => patchField(field.id, { active: !field.active })}><Power size={15} />{field.active ? "Deactivate" : "Reactivate"}</button><button type="button" className="danger" disabled={deleteDisabled} title={deleteDisabled ? "Save or discard changes before deleting permanently" : undefined} onClick={deleteField}><Trash2 size={15} />Delete permanently</button></RowActionMenu></div>
     <label style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 11 }}><input type="checkbox" checked={field.required} onChange={(e) => patchField(field.id, { required: e.target.checked })} />Required on new site records</label>
-    {field.type === "dropdown" && <div className="option-list"><div className="small muted">Dropdown options</div>{field.options.map((option) => <div className="option-row" key={option.id}><span>{option.name}</span><div className="toolbar"><button type="button" className="button icon-button" aria-label={`Rename ${option.name}`} title="Rename option" onClick={() => setEditor({ kind: "option", option })}><Pencil size={14} /></button><button type="button" className={`button icon-button ${option.active ? "danger" : ""}`} aria-label={`${option.active ? "Deactivate" : "Reactivate"} ${option.name}`} title={option.active ? "Deactivate option" : "Reactivate option"} onClick={() => patchDropdownOption(option.id, { active: !option.active })}><Power size={14} /></button></div></div>)}<button type="button" className="button" style={{ marginTop: 8 }} onClick={() => setEditor({ kind: "addOption" })}><Plus size={14} />Add dropdown option</button></div>}
+    {field.type === "dropdown" && <div className="option-list"><div className="small muted">Dropdown options</div>{field.options.map((option) => <div className="option-row" key={option.id}><span>{option.name}</span><RowActionMenu label={`Actions for ${option.name}`}><button type="button" onClick={() => setEditor({ kind: "option", option })}><Pencil size={14} />Rename</button><button type="button" className={option.active ? "danger" : ""} onClick={() => patchDropdownOption(option.id, { active: !option.active })}><Power size={14} />{option.active ? "Deactivate" : "Reactivate"}</button></RowActionMenu></div>)}<button type="button" className="button" style={{ marginTop: 8 }} onClick={() => setEditor({ kind: "addOption" })}><Plus size={14} />Add dropdown option</button></div>}
     {editor && <NameEditorModal title={editor.kind === "field" ? "Rename custom field" : editor.kind === "option" ? "Rename dropdown option" : "Add dropdown option"} label={editor.kind === "field" ? "Field name" : "Option name"} initialValue={editor.kind === "field" ? field.label : editor.option?.name} existingNames={editor.kind === "field" ? otherFieldNames : field.options.filter((option) => option.id !== editor.option?.id).map((option) => option.name)} onClose={() => setEditor(undefined)} onSave={(next) => { if (editor.kind === "field") patchField(field.id, { label: next }); else if (editor.kind === "option" && editor.option) patchDropdownOption(editor.option.id, { name: next }); else patchField(field.id, { options: [...field.options, { id: uuid(), name: next, active: true }] }); setEditor(undefined); }} />}
   </div>;
 }
@@ -946,8 +1095,8 @@ function ComponentTypeSettings({ componentType: type, equipmentFields, otherType
   function createAndAttachField(e: FormEvent) { e.preventDefault(); const label = newFieldLabel.trim(); if (!label) return; const reusable: EquipmentFieldLibraryItem = { id: uuid(), label, type: newFieldType, active: true }; createEquipmentField(reusable); patchType({ fields: [...fields, { id: uuid(), libraryFieldId: reusable.id, required: false, active: true, order: fields.length }] }); setSelectedLibraryId(reusable.id); setNewFieldLabel(""); setNewFieldType("text"); setNewFieldOpen(false); notify("Equipment field created and added. Save changes to apply."); }
   function patchField(id: string, data: Partial<ComponentFieldAttachment>) { patchType({ fields: fields.map((field) => field.id === id ? { ...field, ...data } : field) }); }
   return <div className="section">
-    <div className="settings-row"><div><strong>{type.name}</strong><div className="small muted">{type.active ? "Available for new records" : "Hidden from new records"} | {fields.length} configured fields | {usageCount} installed rows</div></div><div className="toolbar"><button type="button" className="button icon-button" aria-label={`Rename ${type.name}`} title="Rename component type" onClick={() => setRenameOpen(true)}><Pencil size={15} /></button><button type="button" className={`button icon-button ${type.active ? "danger" : ""}`} aria-label={`${type.active ? "Deactivate" : "Reactivate"} ${type.name}`} title={type.active ? "Deactivate component type" : "Reactivate component type"} onClick={() => patchType({ active: !type.active })}><Power size={15} /></button><button type="button" className="button icon-button danger" aria-label={`Delete ${type.name} permanently`} title={deleteDisabled ? "Save or discard changes before deleting permanently" : "Delete component type permanently"} disabled={deleteDisabled} onClick={() => setDeleteOpen(true)}><Trash2 size={15} /></button></div></div>
-    <div className="option-list"><div className="small muted">Equipment fields | drag the handle or use its arrow keys to reorder</div>{[...fields].sort((a, b) => a.order - b.order).map((field) => { const reusable = equipmentFields.find((item) => item.id === field.libraryFieldId); return <div className={`template-field-row ${draggedFieldId === field.id ? "dragging" : ""} ${dragOverFieldId === field.id ? "drag-over" : ""}`} key={field.id} onPointerEnter={() => { if (!draggedFieldId || draggedFieldId === field.id) return; setDragOverFieldId(field.id); reorderField(draggedFieldId, field.id); }}><button type="button" className="drag-handle" aria-label={`Reorder ${reusable?.label ?? "equipment field"}. Use arrow keys to move.`} title="Drag or use arrow keys to reorder" onPointerDown={(e) => { e.preventDefault(); setDraggedFieldId(field.id); setDragOverFieldId(field.id); }} onKeyDown={(e) => { if (e.key === "ArrowUp" || e.key === "ArrowLeft") { e.preventDefault(); moveFieldWithKeyboard(field.id, -1); } else if (e.key === "ArrowDown" || e.key === "ArrowRight") { e.preventDefault(); moveFieldWithKeyboard(field.id, 1); } }}><GripVertical size={16} /></button><span>{reusable?.label ?? "Missing equipment field"}</span><span className="small muted">{reusable ? equipmentFieldTypeLabel(reusable.type) : "Unknown"}</span><label style={{ display: "flex", alignItems: "center", gap: 5 }}><input type="checkbox" checked={field.required} onChange={(e) => patchField(field.id, { required: e.target.checked })} />Required</label><div className="toolbar"><button type="button" className={`button icon-button ${field.active ? "danger" : ""}`} aria-label={`${field.active ? "Deactivate" : "Reactivate"} ${reusable?.label ?? "equipment field"}`} title={field.active ? "Deactivate field" : "Reactivate field"} onClick={() => patchField(field.id, { active: !field.active })}><Power size={14} /></button>{reusable && <button type="button" className="button icon-button danger" aria-label={`Delete ${reusable.label} permanently`} title={deleteDisabled ? "Save or discard changes before deleting permanently" : "Delete equipment field permanently"} disabled={deleteDisabled} onClick={() => setDeletingField(reusable)}><Trash2 size={14} /></button>}</div></div>; })}<div className="template-field-add"><select className="select" aria-label="Choose an equipment field" value={selectedLibraryId} onChange={(e) => selectField(e.target.value)}><option value="">Choose an equipment field</option>{[...equipmentFields].filter((field) => field.active && !fields.some((attachment) => attachment.libraryFieldId === field.id)).sort((a, b) => { const order = ["Serial number", "MAC address"]; const ai = order.indexOf(a.label); const bi = order.indexOf(b.label); return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi) || a.label.localeCompare(b.label); }).map((field) => <option key={field.id} value={field.id}>{field.label}</option>)}<option value="__new__">+ Create new field...</option></select><button type="button" className="button" onClick={addReusableField}><Plus size={14} />Add field</button></div></div>
+    <div className="settings-row"><div><strong>{type.name}</strong><div className="small muted">{type.active ? "Available for new records" : "Hidden from new records"} | {fields.length} configured fields | {usageCount} installed rows</div></div><RowActionMenu label={`Actions for ${type.name}`}><button type="button" onClick={() => setRenameOpen(true)}><Pencil size={15} />Rename component type</button><button type="button" className={type.active ? "danger" : ""} onClick={() => patchType({ active: !type.active })}><Power size={15} />{type.active ? "Deactivate component type" : "Reactivate component type"}</button><button type="button" className="danger" disabled={deleteDisabled} title={deleteDisabled ? "Save or discard changes before deleting permanently" : undefined} onClick={() => setDeleteOpen(true)}><Trash2 size={15} />Delete permanently</button></RowActionMenu></div>
+    <div className="option-list"><div className="small muted">Equipment fields | drag the handle or use its arrow keys to reorder</div>{[...fields].sort((a, b) => a.order - b.order).map((field) => { const reusable = equipmentFields.find((item) => item.id === field.libraryFieldId); return <div className={`template-field-row ${draggedFieldId === field.id ? "dragging" : ""} ${dragOverFieldId === field.id ? "drag-over" : ""}`} key={field.id} onPointerEnter={() => { if (!draggedFieldId || draggedFieldId === field.id) return; setDragOverFieldId(field.id); reorderField(draggedFieldId, field.id); }}><button type="button" className="drag-handle" aria-label={`Reorder ${reusable?.label ?? "equipment field"}. Use arrow keys to move.`} title="Drag or use arrow keys to reorder" onPointerDown={(e) => { e.preventDefault(); setDraggedFieldId(field.id); setDragOverFieldId(field.id); }} onKeyDown={(e) => { if (e.key === "ArrowUp" || e.key === "ArrowLeft") { e.preventDefault(); moveFieldWithKeyboard(field.id, -1); } else if (e.key === "ArrowDown" || e.key === "ArrowRight") { e.preventDefault(); moveFieldWithKeyboard(field.id, 1); } }}><GripVertical size={16} /></button><span>{reusable?.label ?? "Missing equipment field"}</span><span className="small muted">{reusable ? equipmentFieldTypeLabel(reusable.type) : "Unknown"}</span><label style={{ display: "flex", alignItems: "center", gap: 5 }}><input type="checkbox" checked={field.required} onChange={(e) => patchField(field.id, { required: e.target.checked })} />Required</label><RowActionMenu label={`Actions for ${reusable?.label ?? "equipment field"}`}><button type="button" className={field.active ? "danger" : ""} onClick={() => patchField(field.id, { active: !field.active })}><Power size={14} />{field.active ? "Deactivate field" : "Reactivate field"}</button>{reusable && <button type="button" className="danger" disabled={deleteDisabled} title={deleteDisabled ? "Save or discard changes before deleting permanently" : undefined} onClick={() => setDeletingField(reusable)}><Trash2 size={14} />Delete permanently</button>}</RowActionMenu></div>; })}<div className="template-field-add"><select className="select" aria-label="Choose an equipment field" value={selectedLibraryId} onChange={(e) => selectField(e.target.value)}><option value="">Choose an equipment field</option>{[...equipmentFields].filter((field) => field.active && !fields.some((attachment) => attachment.libraryFieldId === field.id)).sort((a, b) => { const order = ["Serial number", "MAC address"]; const ai = order.indexOf(a.label); const bi = order.indexOf(b.label); return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi) || a.label.localeCompare(b.label); }).map((field) => <option key={field.id} value={field.id}>{field.label}</option>)}<option value="__new__">+ Create new field...</option></select><button type="button" className="button" onClick={addReusableField}><Plus size={14} />Add field</button></div></div>
     {deleteOpen && <div className="modal-backdrop" role="presentation"><div className="modal-panel" role="dialog" aria-modal="true" aria-labelledby={`delete-${type.id}`}><div className="modal-icon"><AlertTriangle size={20} /></div><h2 id={`delete-${type.id}`}>Delete {type.name} permanently?</h2><p className="muted">This cannot be undone. Deleting this equipment type removes its field setup and {usageCount} saved equipment {usageCount === 1 ? "entry" : "entries"} from site records. Fields used by other equipment types remain available.</p><div className="modal-actions"><button type="button" className="button" onClick={() => setDeleteOpen(false)}>Cancel</button><button type="button" className="button danger-solid" onClick={deleteType}><Trash2 size={15} />Delete permanently</button></div></div></div>}
     {deletingField && (() => { const usage = equipmentFieldUsage(deletingField.id); return <div className="modal-backdrop" role="presentation"><div className="modal-panel" role="alertdialog" aria-modal="true" aria-labelledby={`delete-field-${deletingField.id}`}><div className="modal-icon"><AlertTriangle size={20} /></div><h2 id={`delete-field-${deletingField.id}`}>Delete {deletingField.label} permanently?</h2><p className="muted">This cannot be undone. The field will be removed from {usage.attachmentCount} equipment {usage.attachmentCount === 1 ? "type" : "types"}, and {usage.savedValueCount} saved site {usage.savedValueCount === 1 ? "value" : "values"} will be deleted.</p><div className="modal-actions"><button type="button" className="button" onClick={() => setDeletingField(undefined)}>Cancel</button><button type="button" className="button danger-solid" onClick={async () => { if (await deleteEquipmentField(deletingField)) setDeletingField(undefined); }}><Trash2 size={15} />Delete field permanently</button></div></div></div>; })()}
     {renameOpen && <NameEditorModal title="Rename component type" label="Component type name" initialValue={type.name} existingNames={otherTypeNames} onClose={() => setRenameOpen(false)} onSave={(next) => { renameType(next); setRenameOpen(false); }} />}
@@ -964,14 +1113,14 @@ function installationRows(records: Installation[], refs: ReferenceData) {
 function downloadCsv(records: Installation[], refs: ReferenceData) {
   const quote = (value: string) => `"${String(value).replaceAll('"', '""')}"`;
   const csv = installationRows(records, refs).map((row) => row.map(quote).join(",")).join("\n");
-  const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); link.download = `fieldtrack-export-${today()}.csv`; link.click();
+  downloadBlob(new Blob([csv], { type: "text/csv" }), `fieldtrack-export-${today()}.csv`);
 }
 
 async function downloadXlsx(records: Installation[], refs: ReferenceData) {
-  const wb = new ExcelJS.Workbook();
+  const wb = await createWorkbook();
   wb.addWorksheet("Installations").addRows(installationRows(records, refs));
   const labels = Array.from(new Set(refs.componentTypes.flatMap((type) => (type.fields ?? []).map((field) => libraryField(refs, field)?.label).filter(Boolean) as string[])));
   wb.addWorksheet("Components").addRows([["Installation ID", "Component Type", "Notes", ...labels], ...records.flatMap((record) => record.components.map((component) => { const fields = componentType(refs, component.type)?.fields ?? []; return [record.id, component.type, component.notes, ...labels.map((label) => { const field = fields.find((item) => libraryField(refs, item)?.label === label); return field ? (component.values ?? {})[field.id] ?? "" : ""; })]; }))]);
-  const buffer = await wb.xlsx.writeBuffer(); const link = document.createElement("a");
-  link.href = URL.createObjectURL(new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })); link.download = `fieldtrack-export-${today()}.xlsx`; link.click();
+  const buffer = await wb.xlsx.writeBuffer();
+  downloadBlob(new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), `fieldtrack-export-${today()}.xlsx`);
 }
