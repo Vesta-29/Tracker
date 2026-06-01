@@ -1,18 +1,18 @@
 import { getSupabase, upsert } from "./supabase-admin.mjs";
 
 const dryRun = process.argv.includes("--dry-run");
-const contractors = ["Lighthouse Network Services", "Northline Systems", "Pacific Link Solutions", "SignalWorks PH"].map((name) => ({ name, active: true }));
-const unitTypes = ["Satellite broadband", "Fixed wireless", "Fiber internet"].map((name) => ({ name, active: true }));
-const componentTypes = ["Dish antenna", "Modem", "Router", "Power supply", "Outdoor radio", "Starlink Performance Kit"].map((name) => ({ name, active: true }));
+const contractors = ["Lighthouse Network Services", "Northline Systems", "Pacific Link Solutions", "SignalWorks PH"].map((name, display_order) => ({ name, active: true, display_order }));
+const unitTypes = ["Satellite broadband", "Fixed wireless", "Fiber internet"].map((name, display_order) => ({ name, active: true, display_order }));
+const componentTypes = ["Dish antenna", "Modem", "Router", "Power supply", "Outdoor radio", "Starlink Performance Kit"].map((name, display_order) => ({ name, active: true, display_order }));
 const equipmentFields = [
   { label: "Serial number", field_type: "text", active: true },
   { label: "MAC address", field_type: "mac", active: true },
   { label: "Kit number", field_type: "text", active: true },
 ];
-const serviceVisitTypes = ["Maintenance", "Repair", "Inspection", "Equipment replacement", "Other"].map((name) => ({ name, active: true }));
+const serviceVisitTypes = ["Maintenance", "Repair", "Inspection", "Equipment replacement", "Other"].map((name, display_order) => ({ name, active: true, display_order }));
 
 if (dryRun) {
-  console.log(`Validated reference seed: ${contractors.length} contractors, ${unitTypes.length} unit types, ${componentTypes.length} component types, ${equipmentFields.length} equipment fields, ${serviceVisitTypes.length} visit types.`);
+  console.log(`Validated reference seed: ${contractors.length} contractors, ${unitTypes.length} solutions, ${componentTypes.length} component types, ${equipmentFields.length} equipment fields, ${serviceVisitTypes.length} visit types.`);
   process.exit(0);
 }
 

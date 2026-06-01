@@ -17,10 +17,11 @@ export type ReferenceOption = {
   id: string;
   name: string;
   active: boolean;
+  order?: number;
 };
 
 export type CustomFieldType = "text" | "number" | "date" | "dropdown";
-export type ComponentFieldType = "text" | "mac";
+export type ComponentFieldType = "text" | "mac" | "integer" | "boolean";
 
 export type ComponentFieldAttachment = {
   id: string;
@@ -138,6 +139,6 @@ export type Profile = {
   id: string;
   fullName: string;
   email: string;
-  role: "admin" | "staff";
+  role: "admin" | "staff" | "guest";
   active: boolean;
 };

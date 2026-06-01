@@ -7,6 +7,12 @@ const supabase = () => getSupabaseBrowser();
 const value = <T>(row: T | T[] | null | undefined) => Array.isArray(row) ? row[0] : row;
 export type LocationOption = { code: string; name: string };
 const locationOptionsCache = new Map<string, LocationOption[]>();
+function invalidRefreshToken(error: unknown) { return typeof error === "object" && error !== null && "code" in error && (error.code === "refresh_token_not_found" || error.code === "refresh_token_already_used"); }
+export async function clearInvalidSession(error: unknown) {
+  if (!invalidRefreshToken(error)) return false;
+  await supabase().auth.signOut({ scope: "local" }).catch(() => undefined);
+  return true;
+}
 
 export async function listLocationOptions(level: "region" | "province" | "municipality" | "barangay", parentCode?: string) {
   const key = `${level}:${parentCode ?? "root"}`;
@@ -32,8 +38,12 @@ export async function signIn(email: string, password: string) {
   const { error } = await supabase().auth.signInWithPassword({ email, password });
   if (error) throw error;
 }
-export async function signOut() { await supabase().auth.signOut(); }
-export async function currentSession() { return (await supabase().auth.getSession()).data.session; }
+export async function signOut() { await supabase().auth.signOut({ scope: "local" }); }
+export async function currentSession() {
+  const { data, error } = await supabase().auth.getSession();
+  if (error) { if (await clearInvalidSession(error)) return null; throw error; }
+  return data.session;
+}
 export async function consumeAuthCallback() {
   const query = new URLSearchParams(window.location.search);
   const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
@@ -61,6 +71,10 @@ export async function setPassword(password: string) {
   const { error } = await supabase().auth.updateUser({ password });
   if (error) throw error;
 }
+export async function changePassword(currentPassword: string, password: string) {
+  const { error } = await supabase().auth.updateUser({ current_password: currentPassword, password });
+  if (error) throw error;
+}
 export async function requestPasswordReset(email: string) {
   const { error } = await supabase().auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
   if (error) throw error;
@@ -78,21 +92,21 @@ export async function loadProfile(): Promise<Profile> {
 export async function loadReferences(): Promise<ReferenceData> {
   const client = supabase();
   const [contractors, unitTypes, componentTypes, equipmentFields, customFields, serviceVisitTypes] = await Promise.all([
-    client.from("contractors").select("id,name,active").order("name"),
-    client.from("unit_types").select("id,name,active").order("name"),
-    client.from("component_types").select("id,name,active,component_field_definitions(id,library_field_id,required,active,display_order)").order("name"),
+    client.from("contractors").select("id,name,active,display_order").order("display_order").order("name"),
+    client.from("unit_types").select("id,name,active,display_order").order("display_order").order("name"),
+    client.from("component_types").select("id,name,active,display_order,component_field_definitions(id,library_field_id,required,active,display_order)").order("display_order").order("name"),
     client.from("equipment_field_library").select("id,label,field_type,active").order("label"),
     client.from("custom_field_definitions").select("id,label,field_type,required,active,display_order,custom_field_options(id,name,active)").order("display_order"),
-    client.from("service_visit_types").select("id,name,active").order("name"),
+    client.from("service_visit_types").select("id,name,active,display_order").order("display_order").order("name"),
   ]);
   for (const result of [contractors, unitTypes, componentTypes, equipmentFields, customFields, serviceVisitTypes]) if (result.error) throw result.error;
   return {
-    contractors: contractors.data!,
-    unitTypes: unitTypes.data!,
-    componentTypes: componentTypes.data!.map((row) => ({ id: row.id, name: row.name, active: row.active, fields: row.component_field_definitions.map((field) => ({ id: field.id, libraryFieldId: field.library_field_id, required: field.required, active: field.active, order: field.display_order })) })),
+    contractors: contractors.data!.map((row) => ({ id: row.id, name: row.name, active: row.active, order: row.display_order })),
+    unitTypes: unitTypes.data!.map((row) => ({ id: row.id, name: row.name, active: row.active, order: row.display_order })),
+    componentTypes: componentTypes.data!.map((row) => ({ id: row.id, name: row.name, active: row.active, order: row.display_order, fields: row.component_field_definitions.map((field) => ({ id: field.id, libraryFieldId: field.library_field_id, required: field.required, active: field.active, order: field.display_order })) })),
     equipmentFields: equipmentFields.data!.map((row) => ({ id: row.id, label: row.label, type: row.field_type, active: row.active })),
     customFields: customFields.data!.map((row) => ({ id: row.id, label: row.label, type: row.field_type, required: row.required, active: row.active, order: row.display_order, options: row.custom_field_options })),
-    serviceVisitTypes: serviceVisitTypes.data!,
+    serviceVisitTypes: serviceVisitTypes.data!.map((row) => ({ id: row.id, name: row.name, active: row.active, order: row.display_order })),
   };
 }
 
@@ -160,22 +174,27 @@ async function uploadPhotos(bucket: string, table: string, ownerColumn: string, 
   }
 }
 
-export async function persistReferences(refs: ReferenceData) {
+export async function persistReferences(refs: ReferenceData, previous?: ReferenceData) {
   const client = supabase();
   const save = async (table: string, rows: object[], onConflict = "id") => { if (!rows.length) return; const { error } = await client.from(table).upsert(rows, { onConflict }); if (error) throw error; };
-  await save("contractors", refs.contractors);
-  await save("unit_types", refs.unitTypes);
-  await save("service_visit_types", refs.serviceVisitTypes);
-  await save("component_types", refs.componentTypes.map(({ id, name, active }) => ({ id, name, active })));
-  await save("equipment_field_library", refs.equipmentFields.map(({ id, label, type, active }) => ({ id, label, field_type: type, active })));
-  await save("component_field_definitions", refs.componentTypes.flatMap((type) => type.fields.map((field) => ({ id: field.id, component_type_id: type.id, library_field_id: field.libraryFieldId, required: field.required, active: field.active, display_order: field.order }))));
-  await save("custom_field_definitions", refs.customFields.map(({ id, label, type, required, active, order }) => ({ id, label, field_type: type, required, active, display_order: order })));
-  await save("custom_field_options", refs.customFields.flatMap((field) => field.options.map((option) => ({ ...option, field_id: field.id }))));
+  const changed = <K extends keyof ReferenceData>(key: K) => !previous || JSON.stringify(refs[key]) !== JSON.stringify(previous[key]);
+  if (changed("contractors")) await save("contractors", refs.contractors.map(({ id, name, active, order }, index) => ({ id, name, active, display_order: order ?? index })));
+  if (changed("unitTypes")) await save("unit_types", refs.unitTypes.map(({ id, name, active, order }, index) => ({ id, name, active, display_order: order ?? index })));
+  if (changed("serviceVisitTypes")) await save("service_visit_types", refs.serviceVisitTypes.map(({ id, name, active, order }, index) => ({ id, name, active, display_order: order ?? index })));
+  if (changed("componentTypes")) {
+    await save("component_types", refs.componentTypes.map(({ id, name, active, order }, index) => ({ id, name, active, display_order: order ?? index })));
+  }
+  if (changed("equipmentFields")) await save("equipment_field_library", refs.equipmentFields.map(({ id, label, type, active }) => ({ id, label, field_type: type, active })));
+  if (changed("componentTypes")) await save("component_field_definitions", refs.componentTypes.flatMap((type) => type.fields.map((field) => ({ id: field.id, component_type_id: type.id, library_field_id: field.libraryFieldId, required: field.required, active: field.active, display_order: field.order }))));
+  if (changed("customFields")) {
+    await save("custom_field_definitions", refs.customFields.map(({ id, label, type, required, active, order }) => ({ id, label, field_type: type, required, active, display_order: order })));
+    await save("custom_field_options", refs.customFields.flatMap((field) => field.options.map((option) => ({ ...option, field_id: field.id }))));
+  }
 }
 
-export async function deleteReferencePermanently(kind: "contractor" | "unitType" | "customField" | "componentType", id: string) {
-  const functions = { contractor: "delete_contractor_permanently", unitType: "delete_unit_type_permanently", customField: "delete_custom_field_permanently", componentType: "delete_component_type_permanently" } as const;
-  const args = { contractor: { target_contractor_id: id }, unitType: { target_unit_type_id: id }, customField: { target_field_id: id }, componentType: { target_component_type_id: id } } as const;
+export async function deleteReferencePermanently(kind: "contractor" | "unitType" | "customField" | "componentType" | "equipmentField", id: string) {
+  const functions = { contractor: "delete_contractor_permanently", unitType: "delete_unit_type_permanently", customField: "delete_custom_field_permanently", componentType: "delete_component_type_permanently", equipmentField: "delete_equipment_field_permanently" } as const;
+  const args = { contractor: { target_contractor_id: id }, unitType: { target_unit_type_id: id }, customField: { target_field_id: id }, componentType: { target_component_type_id: id }, equipmentField: { target_library_field_id: id } } as const;
   const { error } = await supabase().rpc(functions[kind], args[kind]);
   if (error) throw error;
 }
@@ -189,9 +208,13 @@ export async function listUsers(): Promise<Profile[]> {
   const session = await currentSession(); const response = await fetch("/api/users", { headers: { Authorization: `Bearer ${session?.access_token}` } });
   const data = await response.json(); if (!response.ok) throw new Error(data.error); return data.map((row: any) => ({ id: row.id, fullName: row.full_name, email: row.email, role: row.role, active: row.active }));
 }
-export async function inviteUser(email: string) {
-  const session = await currentSession(); const response = await fetch("/api/users", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` }, body: JSON.stringify({ email, redirectTo: `${window.location.origin}` }) });
-  const data = await response.json(); if (!response.ok) throw new Error(data.error);
+export async function createUser(fullName: string, email: string) {
+  const session = await currentSession(); const response = await fetch("/api/users", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` }, body: JSON.stringify({ fullName, email }) });
+  const data = await response.json(); if (!response.ok) throw new Error(data.error); return data as { id: string; temporaryPassword: string };
+}
+export async function generateUserTemporaryPassword(id: string) {
+  const session = await currentSession(); const response = await fetch("/api/users/password", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` }, body: JSON.stringify({ id }) });
+  const data = await response.json(); if (!response.ok) throw new Error(data.error); return data as { temporaryPassword: string };
 }
 export async function updateUser(profile: Profile) {
   const session = await currentSession(); const response = await fetch("/api/users", { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` }, body: JSON.stringify(profile) });

@@ -14,7 +14,13 @@ export async function proxy(request: NextRequest) {
       },
     },
   });
-  await supabase.auth.getUser();
+  const { error } = await supabase.auth.getUser();
+  if (error?.code === "refresh_token_not_found" || error?.code === "refresh_token_already_used") {
+    request.cookies.getAll().filter(({ name }) => name.startsWith("sb-") && name.includes("-auth-token")).forEach(({ name }) => {
+      request.cookies.delete(name);
+      response.cookies.set(name, "", { path: "/", maxAge: 0 });
+    });
+  }
   return response;
 }
 
