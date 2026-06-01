@@ -1,14 +1,20 @@
 import { notFound, redirect } from "next/navigation";
+import { cache } from "react";
 import { getSupabaseServer } from "@/lib/supabase-server";
 import type { Profile } from "@/lib/types";
 
-export async function requireProfile(roles?: Profile["role"][]) {
+const loadProfile = cache(async () => {
   const supabase = await getSupabaseServer();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect("/");
-  const { data } = await supabase.from("profiles").select("id,full_name,email,role,active").eq("id", user.id).maybeSingle();
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const userId = claimsData?.claims?.sub;
+  if (!userId) redirect("/");
+  const { data } = await supabase.from("profiles").select("id,full_name,email,role,active").eq("id", userId).maybeSingle();
   if (!data?.active) redirect("/");
-  const profile: Profile = { id: data.id, fullName: data.full_name, email: data.email, role: data.role, active: data.active };
+  return { id: data.id, fullName: data.full_name, email: data.email, role: data.role, active: data.active } as Profile;
+});
+
+export async function requireProfile(roles?: Profile["role"][]) {
+  const profile = await loadProfile();
   if (roles && !roles.includes(profile.role)) redirect("/dashboard");
   return profile;
 }

@@ -14,7 +14,7 @@ export async function proxy(request: NextRequest) {
       },
     },
   });
-  const { error } = await supabase.auth.getUser();
+  const { error } = await supabase.auth.getClaims();
   if (error?.code === "refresh_token_not_found" || error?.code === "refresh_token_already_used") {
     request.cookies.getAll().filter(({ name }) => name.startsWith("sb-") && name.includes("-auth-token")).forEach(({ name }) => {
       request.cookies.delete(name);
@@ -24,4 +24,4 @@ export async function proxy(request: NextRequest) {
   return response;
 }
 
-export const config = { matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"] };
+export const config = { matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js|map|woff2?)$).*)"] };
