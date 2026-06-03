@@ -1,6 +1,7 @@
 import { requireProfile } from "@/lib/route-auth";
+import TrackerApp from "@/components/tracker-app";
 
-export default async function AdminLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function AdminLayout() {
   await requireProfile(["admin"]);
-  return children;
+  return <TrackerApp />;
 }

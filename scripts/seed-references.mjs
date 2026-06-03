@@ -1,6 +1,12 @@
 import { getSupabase, upsert } from "./supabase-admin.mjs";
 
 const dryRun = process.argv.includes("--dry-run");
+const siteStatuses = [
+  ["scheduled", "Scheduled"],
+  ["installed", "Installed"],
+  ["issue", "Issue"],
+  ["cancelled", "Cancelled"],
+].map(([value, name], display_order) => ({ value, name, active: true, display_order }));
 const contractors = ["Lighthouse Network Services", "Northline Systems", "Pacific Link Solutions", "SignalWorks PH"].map((name, display_order) => ({ name, active: true, display_order }));
 const unitTypes = ["Satellite broadband", "Fixed wireless", "Fiber internet"].map((name, display_order) => ({ name, active: true, display_order }));
 const componentTypes = ["Dish antenna", "Modem", "Router", "Power supply", "Outdoor radio", "Starlink Performance Kit"].map((name, display_order) => ({ name, active: true, display_order }));
@@ -12,11 +18,12 @@ const equipmentFields = [
 const serviceVisitTypes = ["Maintenance", "Repair", "Inspection", "Equipment replacement", "Other"].map((name, display_order) => ({ name, active: true, display_order }));
 
 if (dryRun) {
-  console.log(`Validated reference seed: ${contractors.length} contractors, ${unitTypes.length} solutions, ${componentTypes.length} component types, ${equipmentFields.length} equipment fields, ${serviceVisitTypes.length} visit types.`);
+  console.log(`Validated reference seed: ${siteStatuses.length} site statuses, ${contractors.length} contractors, ${unitTypes.length} solutions, ${componentTypes.length} component types, ${equipmentFields.length} equipment fields, ${serviceVisitTypes.length} visit types.`);
   process.exit(0);
 }
 
 const supabase = getSupabase();
+await upsert(supabase, "installation_status_options", siteStatuses, "value");
 await upsert(supabase, "contractors", contractors);
 await upsert(supabase, "unit_types", unitTypes);
 await upsert(supabase, "component_types", componentTypes);

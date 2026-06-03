@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import { getIslandGroup } from "@/lib/location-groups";
-import type { AuditEvent, Component, Installation, Profile, ReferenceData, ServiceVisit } from "@/lib/types";
+import type { AuditEvent, Component, Installation, Profile, ReferenceData, ServiceVisit, Status, StatusReferenceOption } from "@/lib/types";
 
 const supabase = () => getSupabaseBrowser();
 const value = <T>(row: T | T[] | null | undefined) => Array.isArray(row) ? row[0] : row;
@@ -18,7 +18,19 @@ let cachedUsersAt = 0;
 let usersRequest: Promise<Profile[]> | undefined;
 const usersCacheMs = 60_000;
 const operationalCacheMs = 60_000;
+const defaultSiteStatuses: StatusReferenceOption[] = [
+  { id: "status-scheduled", value: "scheduled", name: "Scheduled", active: true, order: 0 },
+  { id: "status-installed", value: "installed", name: "Installed", active: true, order: 1 },
+  { id: "status-issue", value: "issue", name: "Issue", active: true, order: 2 },
+  { id: "status-cancelled", value: "cancelled", name: "Cancelled", active: true, order: 3 },
+];
 function invalidRefreshToken(error: unknown) { return typeof error === "object" && error !== null && "code" in error && (error.code === "refresh_token_not_found" || error.code === "refresh_token_already_used"); }
+function missingStatusReferenceTable(error: unknown) {
+  return typeof error === "object"
+    && error !== null
+    && "message" in error
+    && String(error.message).includes("installation_status_options");
+}
 function clearOperationalCaches() {
   cachedProfile = undefined; cachedProfileAt = 0; profileRequest = undefined;
   cachedReferences = undefined; cachedReferencesAt = 0; referencesRequest = undefined;
@@ -120,7 +132,8 @@ export async function loadReferences({ force = false }: { force?: boolean } = {}
   if (referencesRequest) return referencesRequest;
   referencesRequest = (async () => {
     const client = supabase();
-    const [contractors, unitTypes, componentTypes, equipmentFields, customFields, serviceVisitTypes] = await Promise.all([
+    const [siteStatuses, contractors, unitTypes, componentTypes, equipmentFields, customFields, serviceVisitTypes] = await Promise.all([
+      client.from("installation_status_options").select("id,value,name,active,display_order").order("display_order").order("name"),
       client.from("contractors").select("id,name,active,display_order").order("display_order").order("name"),
       client.from("unit_types").select("id,name,active,display_order").order("display_order").order("name"),
       client.from("component_types").select("id,name,active,display_order,component_field_definitions(id,library_field_id,required,active,display_order)").order("display_order").order("name"),
@@ -129,7 +142,9 @@ export async function loadReferences({ force = false }: { force?: boolean } = {}
       client.from("service_visit_types").select("id,name,active,display_order").order("display_order").order("name"),
     ]);
     for (const result of [contractors, unitTypes, componentTypes, equipmentFields, customFields, serviceVisitTypes]) if (result.error) throw result.error;
+    if (siteStatuses.error && !missingStatusReferenceTable(siteStatuses.error)) throw siteStatuses.error;
     cachedReferences = {
+      siteStatuses: siteStatuses.error ? defaultSiteStatuses : siteStatuses.data!.map((row) => ({ id: row.id, value: row.value as Status, name: row.name, active: row.active, order: row.display_order })),
       contractors: contractors.data!.map((row) => ({ id: row.id, name: row.name, active: row.active, order: row.display_order })),
       unitTypes: unitTypes.data!.map((row) => ({ id: row.id, name: row.name, active: row.active, order: row.display_order })),
       componentTypes: componentTypes.data!.map((row) => ({ id: row.id, name: row.name, active: row.active, order: row.display_order, fields: row.component_field_definitions.map((field) => ({ id: field.id, libraryFieldId: field.library_field_id, required: field.required, active: field.active, order: field.display_order })) })),
@@ -281,6 +296,21 @@ export async function saveInstallationBatch(filename: string, records: Installat
   const { error } = await supabase().rpc("save_installation_batch", { source_filename: filename, payload: records });
   if (error) throw error;
 }
+export async function bulkUpdateInstallations(ids: string[], changes: { status?: Installation["status"]; contractor?: string }) {
+  if (!ids.length || (!changes.status && !changes.contractor)) return;
+  const client = supabase();
+  const { data: { user } } = await client.auth.getUser();
+  if (!user) throw new Error("Sign in before updating sites.");
+  const payload: Record<string, string> = { updated_by: user.id, updated_at: new Date().toISOString() };
+  if (changes.status) payload.status = changes.status;
+  if (changes.contractor) {
+    const { data, error } = await client.from("contractors").select("id").eq("name", changes.contractor).single();
+    if (error) throw error;
+    payload.contractor_id = data.id;
+  }
+  const { error } = await client.from("installations").update(payload).in("id", ids);
+  if (error) throw error;
+}
 export async function saveVisit(installation: Installation, visit: ServiceVisit, components: Component[]) {
   const { data, error } = await supabase().rpc("save_service_visit", { payload: { ...visit, installationDbId: installation.dbId }, installation_payload: { ...installation, components } });
   if (error) throw error;
@@ -306,6 +336,7 @@ export async function persistReferences(refs: ReferenceData, previous?: Referenc
   const client = supabase();
   const save = async (table: string, rows: object[], onConflict = "id") => { if (!rows.length) return; const { error } = await client.from(table).upsert(rows, { onConflict }); if (error) throw error; };
   const changed = <K extends keyof ReferenceData>(key: K) => !previous || JSON.stringify(refs[key]) !== JSON.stringify(previous[key]);
+  if (changed("siteStatuses")) await save("installation_status_options", refs.siteStatuses.map(({ id, value, name, active, order }, index) => ({ id, value, name, active, display_order: order ?? index })));
   if (changed("contractors")) await save("contractors", refs.contractors.map(({ id, name, active, order }, index) => ({ id, name, active, display_order: order ?? index })));
   if (changed("unitTypes")) await save("unit_types", refs.unitTypes.map(({ id, name, active, order }, index) => ({ id, name, active, display_order: order ?? index })));
   if (changed("serviceVisitTypes")) await save("service_visit_types", refs.serviceVisitTypes.map(({ id, name, active, order }, index) => ({ id, name, active, display_order: order ?? index })));

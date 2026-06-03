@@ -9,6 +9,12 @@ const angelesBalibago = requireLocation({ regionCode: "0300000000", provinceCode
 const batangasSabang = requireLocation({ regionCode: "0400000000", provinceCode: "0401000000", municipalityCode: "0401014000", barangayCode: "0401014054" });
 
 export const defaultReferences: ReferenceData = {
+  siteStatuses: [
+    { id: "status-scheduled", value: "scheduled", name: "Scheduled", active: true, order: 0 },
+    { id: "status-installed", value: "installed", name: "Installed", active: true, order: 1 },
+    { id: "status-issue", value: "issue", name: "Issue", active: true, order: 2 },
+    { id: "status-cancelled", value: "cancelled", name: "Cancelled", active: true, order: 3 },
+  ],
   contractors: [
     { id: "ctr-lighthouse", name: "Lighthouse Network Services", active: true },
     { id: "ctr-northline", name: "Northline Systems", active: true },

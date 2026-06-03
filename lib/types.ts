@@ -20,6 +20,10 @@ export type ReferenceOption = {
   order?: number;
 };
 
+export type StatusReferenceOption = ReferenceOption & {
+  value: Status;
+};
+
 export type CustomFieldType = "text" | "number" | "date" | "dropdown";
 export type ComponentFieldType = "text" | "mac" | "integer" | "boolean";
 
@@ -127,6 +131,7 @@ export type Installation = {
 };
 
 export type ReferenceData = {
+  siteStatuses: StatusReferenceOption[];
   contractors: ReferenceOption[];
   unitTypes: ReferenceOption[];
   componentTypes: ComponentTypeOption[];
