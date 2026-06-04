@@ -1,4 +1,4 @@
-export type Status = "scheduled" | "installed" | "issue" | "cancelled";
+export type Status = string;
 export type IslandGroup = "Luzon" | "Visayas" | "Mindanao";
 
 export type Component = {

@@ -357,9 +357,9 @@ export async function persistReferences(refs: ReferenceData, previous?: Referenc
   invalidateReferencesCache();
 }
 
-export async function deleteReferencePermanently(kind: "contractor" | "unitType" | "customField" | "componentType" | "equipmentField", id: string) {
-  const functions = { contractor: "delete_contractor_permanently", unitType: "delete_unit_type_permanently", customField: "delete_custom_field_permanently", componentType: "delete_component_type_permanently", equipmentField: "delete_equipment_field_permanently" } as const;
-  const args = { contractor: { target_contractor_id: id }, unitType: { target_unit_type_id: id }, customField: { target_field_id: id }, componentType: { target_component_type_id: id }, equipmentField: { target_library_field_id: id } } as const;
+export async function deleteReferencePermanently(kind: "siteStatus" | "contractor" | "unitType" | "customField" | "componentType" | "equipmentField", id: string) {
+  const functions = { siteStatus: "delete_installation_status_permanently", contractor: "delete_contractor_permanently", unitType: "delete_unit_type_permanently", customField: "delete_custom_field_permanently", componentType: "delete_component_type_permanently", equipmentField: "delete_equipment_field_permanently" } as const;
+  const args = { siteStatus: { target_status_id: id }, contractor: { target_contractor_id: id }, unitType: { target_unit_type_id: id }, customField: { target_field_id: id }, componentType: { target_component_type_id: id }, equipmentField: { target_library_field_id: id } } as const;
   const { error } = await supabase().rpc(functions[kind], args[kind]);
   if (error) throw error;
 }
