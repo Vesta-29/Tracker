@@ -239,7 +239,7 @@ export default function TrackerApp() {
         : pathname === "/import" ? loadInstallationValidationRecords
         : isAdminSettingsRoute ? loadInstallationValidationRecords
         : loadInstallationValidationRecords;
-      const [nextProfile, nextRefs, nextRecords] = await Promise.all([loadProfile(), loadReferences(), loadRouteRecords()]);
+      const [nextProfile, nextRefs, nextRecords] = await Promise.all([loadProfile({ force: invalidate }), loadReferences({ force: true }), loadRouteRecords()]);
       cacheRouteWorkspace(routeKey, nextProfile, nextRefs, nextRecords);
       setProfile(nextProfile); setRecords(nextRecords); setRefs(nextRefs); setSavedRefs(nextRefs); setLoadedRouteKey(routeKey); setLoggedIn(true); if (pathname === "/") router.replace("/dashboard");
     }
@@ -257,7 +257,7 @@ export default function TrackerApp() {
     try {
       const reloadRecords = referenceNamesChanged(refs, savedRefs);
       await persistReferences(refs, savedRefs);
-      const [latestRefs, latestRecords] = await Promise.all([loadReferences(), reloadRecords ? loadInstallations() : Promise.resolve(undefined)]);
+      const [latestRefs, latestRecords] = await Promise.all([loadReferences({ force: true }), reloadRecords ? loadInstallations() : Promise.resolve(undefined)]);
       invalidateRouteWorkspaceCache(); setRefs(latestRefs); setSavedRefs(latestRefs); if (latestRecords) setRecords(latestRecords);
       setReferenceSaveState("saved"); notify("Settings saved."); return true;
     }

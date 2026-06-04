@@ -63,8 +63,10 @@ async function signedPhotos(bucket: string, rows: { storage_path: string; captio
 }
 
 export async function signIn(email: string, password: string) {
+  clearOperationalCaches();
   const { error } = await supabase().auth.signInWithPassword({ email, password });
   if (error) throw error;
+  clearOperationalCaches();
 }
 export async function signOut() {
   clearOperationalCaches();
@@ -86,12 +88,15 @@ export async function consumeAuthCallback() {
   if (code) {
     const { error } = await supabase().auth.exchangeCodeForSession(code);
     if (error) throw error;
+    clearOperationalCaches();
   } else if (tokenHash && (type === "invite" || type === "recovery")) {
     const { error } = await supabase().auth.verifyOtp({ token_hash: tokenHash, type });
     if (error) throw error;
+    clearOperationalCaches();
   } else if (accessToken && refreshToken) {
     const { error } = await supabase().auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
     if (error) throw error;
+    clearOperationalCaches();
   }
   const passwordSetup = type === "invite" || type === "recovery";
   if (passwordSetup && !(await currentSession())) throw new Error("This password setup link is invalid or expired. Request a new password setup email.");
