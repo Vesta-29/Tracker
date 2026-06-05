@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
-import { generateTemporaryPassword } from "@/lib/temporary-password";
+
+const defaultNewUserPassword = "Yeswecan123!";
 
 async function requireAdmin(request: Request) {
   const token = request.headers.get("authorization")?.replace(/^Bearer /, "");
@@ -30,7 +31,7 @@ export async function POST(request: Request) {
     const name = String(fullName || "").trim();
     if (!normalizedEmail || !name) throw new Error("Enter a display name and email address.");
     if (name.length > 120) throw new Error("Use a display name with 120 characters or fewer.");
-    const temporaryPassword = generateTemporaryPassword();
+    const temporaryPassword = defaultNewUserPassword;
     const { data, error } = await supabase.auth.admin.createUser({ email: normalizedEmail, password: temporaryPassword, email_confirm: true, user_metadata: { full_name: name } });
     if (error) throw error;
     return NextResponse.json({ id: data.user.id, temporaryPassword });

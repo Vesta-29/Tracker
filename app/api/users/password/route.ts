@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
-import { generateTemporaryPassword } from "@/lib/temporary-password";
+
+const defaultTemporaryPassword = "Yeswecan123!";
 
 async function requireAdmin(request: Request) {
   const token = request.headers.get("authorization")?.replace(/^Bearer /, "");
@@ -19,7 +20,7 @@ export async function POST(request: Request) {
     const { id } = await request.json();
     if (!id) throw new Error("Choose a user.");
     if (id === currentUserId) throw new Error("Use your account menu to change your own password.");
-    const temporaryPassword = generateTemporaryPassword();
+    const temporaryPassword = defaultTemporaryPassword;
     const { error } = await supabase.auth.admin.updateUserById(id, { password: temporaryPassword });
     if (error) throw error;
     return NextResponse.json({ temporaryPassword });
