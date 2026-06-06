@@ -9,7 +9,8 @@ const siteStatuses = [
 ].map(([value, name], display_order) => ({ value, name, active: true, display_order }));
 const contractors = ["Lighthouse Network Services", "Northline Systems", "Pacific Link Solutions", "SignalWorks PH"].map((name, display_order) => ({ name, active: true, display_order }));
 const unitTypes = ["Satellite broadband", "Fixed wireless", "Fiber internet"].map((name, display_order) => ({ name, active: true, display_order }));
-const componentTypes = ["Dish antenna", "Modem", "Router", "Power supply", "Outdoor radio", "Starlink Performance Kit"].map((name, display_order) => ({ name, active: true, display_order }));
+const defaultComponentTypes = new Set(["Dish antenna", "Modem", "Router"]);
+const componentTypes = ["Dish antenna", "Modem", "Router", "Power supply", "Outdoor radio", "Starlink Performance Kit"].map((name, display_order) => ({ name, active: true, display_order, default_on_new_site: defaultComponentTypes.has(name) }));
 const equipmentFields = [
   { label: "Serial number", field_type: "text", active: true },
   { label: "MAC address", field_type: "mac", active: true },

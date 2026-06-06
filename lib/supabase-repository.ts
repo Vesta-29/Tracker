@@ -31,6 +31,12 @@ function missingStatusReferenceTable(error: unknown) {
     && "message" in error
     && String(error.message).includes("installation_status_options");
 }
+function missingDefaultComponentTypeColumn(error: unknown) {
+  return typeof error === "object"
+    && error !== null
+    && "message" in error
+    && String(error.message).includes("default_on_new_site");
+}
 function clearOperationalCaches() {
   cachedProfile = undefined; cachedProfileAt = 0; profileRequest = undefined;
   cachedReferences = undefined; cachedReferencesAt = 0; referencesRequest = undefined;
@@ -137,22 +143,25 @@ export async function loadReferences({ force = false }: { force?: boolean } = {}
   if (referencesRequest) return referencesRequest;
   referencesRequest = (async () => {
     const client = supabase();
-    const [siteStatuses, contractors, unitTypes, componentTypes, equipmentFields, customFields, serviceVisitTypes] = await Promise.all([
+    const [siteStatuses, contractors, unitTypes, componentTypesWithDefault, equipmentFields, customFields, serviceVisitTypes] = await Promise.all([
       client.from("installation_status_options").select("id,value,name,active,display_order").order("display_order").order("name"),
       client.from("contractors").select("id,name,active,display_order").order("display_order").order("name"),
       client.from("unit_types").select("id,name,active,display_order").order("display_order").order("name"),
-      client.from("component_types").select("id,name,active,display_order,component_field_definitions(id,library_field_id,required,active,display_order)").order("display_order").order("name"),
+      client.from("component_types").select("id,name,active,display_order,default_on_new_site,component_field_definitions(id,library_field_id,required,active,display_order)").order("display_order").order("name"),
       client.from("equipment_field_library").select("id,label,field_type,active").order("label"),
       client.from("custom_field_definitions").select("id,label,field_type,required,active,display_order,custom_field_options(id,name,active)").order("display_order"),
       client.from("service_visit_types").select("id,name,active,display_order").order("display_order").order("name"),
     ]);
+    const componentTypes = componentTypesWithDefault.error && missingDefaultComponentTypeColumn(componentTypesWithDefault.error)
+      ? await client.from("component_types").select("id,name,active,display_order,component_field_definitions(id,library_field_id,required,active,display_order)").order("display_order").order("name")
+      : componentTypesWithDefault;
     for (const result of [contractors, unitTypes, componentTypes, equipmentFields, customFields, serviceVisitTypes]) if (result.error) throw result.error;
     if (siteStatuses.error && !missingStatusReferenceTable(siteStatuses.error)) throw siteStatuses.error;
     cachedReferences = {
       siteStatuses: siteStatuses.error ? defaultSiteStatuses : siteStatuses.data!.map((row) => ({ id: row.id, value: row.value as Status, name: row.name, active: row.active, order: row.display_order })),
       contractors: contractors.data!.map((row) => ({ id: row.id, name: row.name, active: row.active, order: row.display_order })),
       unitTypes: unitTypes.data!.map((row) => ({ id: row.id, name: row.name, active: row.active, order: row.display_order })),
-      componentTypes: componentTypes.data!.map((row) => ({ id: row.id, name: row.name, active: row.active, order: row.display_order, fields: row.component_field_definitions.map((field) => ({ id: field.id, libraryFieldId: field.library_field_id, required: field.required, active: field.active, order: field.display_order })) })),
+      componentTypes: componentTypes.data!.map((row) => ({ id: row.id, name: row.name, active: row.active, order: row.display_order, defaultOnNewSite: Boolean("default_on_new_site" in row && row.default_on_new_site), fields: row.component_field_definitions.map((field) => ({ id: field.id, libraryFieldId: field.library_field_id, required: field.required, active: field.active, order: field.display_order })) })),
       equipmentFields: equipmentFields.data!.map((row) => ({ id: row.id, label: row.label, type: row.field_type, active: row.active })),
       customFields: customFields.data!.map((row) => ({ id: row.id, label: row.label, type: row.field_type, required: row.required, active: row.active, order: row.display_order, options: row.custom_field_options })),
       serviceVisitTypes: serviceVisitTypes.data!.map((row) => ({ id: row.id, name: row.name, active: row.active, order: row.display_order })),
@@ -346,7 +355,9 @@ export async function persistReferences(refs: ReferenceData, previous?: Referenc
   if (changed("unitTypes")) await save("unit_types", refs.unitTypes.map(({ id, name, active, order }, index) => ({ id, name, active, display_order: order ?? index })));
   if (changed("serviceVisitTypes")) await save("service_visit_types", refs.serviceVisitTypes.map(({ id, name, active, order }, index) => ({ id, name, active, display_order: order ?? index })));
   if (changed("componentTypes")) {
-    await save("component_types", refs.componentTypes.map(({ id, name, active, order }, index) => ({ id, name, active, display_order: order ?? index })));
+    const componentTypeRows = refs.componentTypes.map(({ id, name, active, order, defaultOnNewSite }, index) => ({ id, name, active, display_order: order ?? index, default_on_new_site: Boolean(defaultOnNewSite) }));
+    try { await save("component_types", componentTypeRows); }
+    catch (error) { if (missingDefaultComponentTypeColumn(error)) throw new Error("Apply the latest Supabase migration before saving pinned component defaults."); throw error; }
   }
   if (changed("equipmentFields")) await save("equipment_field_library", refs.equipmentFields.map(({ id, label, type, active }) => ({ id, label, field_type: type, active })));
   if (changed("componentTypes")) await save("component_field_definitions", refs.componentTypes.flatMap((type) => type.fields.map((field) => ({ id: field.id, component_type_id: type.id, library_field_id: field.libraryFieldId, required: field.required, active: field.active, display_order: field.order }))));

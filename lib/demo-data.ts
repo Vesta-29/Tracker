@@ -27,9 +27,9 @@ export const defaultReferences: ReferenceData = {
     { id: "unit-fiber", name: "Fiber internet", active: true },
   ],
   componentTypes: [
-    { id: "component-dish", name: "Dish antenna", active: true, fields: [{ id: "dish-serial", libraryFieldId: "library-serial", required: false, active: true, order: 0 }] },
-    { id: "component-modem", name: "Modem", active: true, fields: [{ id: "modem-serial", libraryFieldId: "library-serial", required: true, active: true, order: 0 }, { id: "modem-mac", libraryFieldId: "library-mac", required: false, active: true, order: 1 }] },
-    { id: "component-router", name: "Router", active: true, fields: [{ id: "router-serial", libraryFieldId: "library-serial", required: true, active: true, order: 0 }, { id: "router-mac", libraryFieldId: "library-mac", required: false, active: true, order: 1 }] },
+    { id: "component-dish", name: "Dish antenna", active: true, defaultOnNewSite: true, fields: [{ id: "dish-serial", libraryFieldId: "library-serial", required: false, active: true, order: 0 }] },
+    { id: "component-modem", name: "Modem", active: true, defaultOnNewSite: true, fields: [{ id: "modem-serial", libraryFieldId: "library-serial", required: true, active: true, order: 0 }, { id: "modem-mac", libraryFieldId: "library-mac", required: false, active: true, order: 1 }] },
+    { id: "component-router", name: "Router", active: true, defaultOnNewSite: true, fields: [{ id: "router-serial", libraryFieldId: "library-serial", required: true, active: true, order: 0 }, { id: "router-mac", libraryFieldId: "library-mac", required: false, active: true, order: 1 }] },
     { id: "component-power", name: "Power supply", active: true, fields: [{ id: "power-serial", libraryFieldId: "library-serial", required: false, active: true, order: 0 }] },
     { id: "component-radio", name: "Outdoor radio", active: true, fields: [{ id: "radio-serial", libraryFieldId: "library-serial", required: true, active: true, order: 0 }, { id: "radio-mac", libraryFieldId: "library-mac", required: false, active: true, order: 1 }] },
     { id: "component-starlink", name: "Starlink Performance Kit", active: true, fields: [{ id: "starlink-kit", libraryFieldId: "library-kit", required: true, active: true, order: 0 }, { id: "starlink-serial", libraryFieldId: "library-serial", required: false, active: true, order: 1 }] },

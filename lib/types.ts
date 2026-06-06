@@ -43,6 +43,7 @@ export type EquipmentFieldLibraryItem = {
 };
 
 export type ComponentTypeOption = ReferenceOption & {
+  defaultOnNewSite?: boolean;
   fields: ComponentFieldAttachment[];
 };
 
