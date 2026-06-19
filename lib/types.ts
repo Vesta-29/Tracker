@@ -120,7 +120,8 @@ export type Installation = {
   municipalityCode: string;
   barangay: string;
   barangayCode: string;
-  plusCode: string;
+  longitude: string;
+  latitude: string;
   beneficiaryContacts: BeneficiaryContact[];
   beneficiaryName: string;
   beneficiaryRole: string;
