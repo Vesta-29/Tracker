@@ -21,6 +21,7 @@ type ReferenceSaveState = "idle" | "saving" | "saved" | "failed";
 type ImportRow = { row: number; kind: "Site" | "Equipment"; subject: string; details: string; reference: string; valid: boolean; issue: string };
 const emptyFilter: Filter = { search: "", status: "", contractor: "", islandGroup: "", regionCode: "", provinceCode: "", municipalityCode: "", barangayCode: "", from: "", to: "", attention: "" };
 const emptyReferences: ReferenceData = { siteStatuses: [], contractors: [], unitTypes: [], componentTypes: [], equipmentFields: [], customFields: [], serviceVisitTypes: [] };
+const addContractorOption = "__add_contractor__";
 type RouteWorkspace = { profile: Profile; refs: ReferenceData; records: Installation[]; loadedAt: number };
 type SavedSiteFilter = { id: string; name: string; filters: Filter };
 const routeWorkspaceCache = new Map<string, RouteWorkspace>();
@@ -306,6 +307,21 @@ export default function TrackerApp() {
     }
     catch (error) { setReferenceSaveState("failed"); setReferenceSaveError(error instanceof Error ? error.message : "Unable to save reference settings."); return false; }
   }, [refs, savedRefs, notify]);
+  const addContractorFromRecord = useCallback(async (rawName: string) => {
+    const name = rawName.trim();
+    if (!name) throw new Error("Enter a contractor name.");
+    const existing = refs.contractors.find((contractor) => contractor.name.toLowerCase() === name.toLowerCase());
+    const nextRefs = existing
+      ? { ...refs, contractors: refs.contractors.map((contractor) => contractor.id === existing.id ? { ...contractor, active: true } : contractor) }
+      : { ...refs, contractors: [...refs.contractors, { id: uuid(), name, active: true, order: refs.contractors.length }] };
+    await persistReferences(nextRefs, savedRefs);
+    const latestRefs = await loadReferences({ force: true });
+    invalidateRouteWorkspaceCache();
+    setRefs(latestRefs);
+    setSavedRefs(latestRefs);
+    notify(existing ? `${existing.name} is now available.` : `${name} was added.`);
+    return existing?.name ?? name;
+  }, [refs, savedRefs, notify]);
   const hasUnsavedReferences = useMemo(() => JSON.stringify(refs) !== JSON.stringify(savedRefs), [refs, savedRefs]);
   useEffect(() => {
     if (!hasUnsavedReferences && !hasUnsavedChanges) return;
@@ -415,6 +431,7 @@ export default function TrackerApp() {
               initial={siteRecord}
               fetchAuditEvents={loadInstallationAuditEvents}
               fetchServiceVisits={loadInstallationServiceVisits}
+              onAddContractor={addContractorFromRecord}
               onSave={(rec) => {
                 const stayOnSite = siteRecord && !navAttempt && !routeNavAttempt;
                 return save(rec, navAttempt ?? "installations", stayOnSite ? `/sites/${encodeURIComponent(rec.id)}` : routeNavAttempt);
@@ -834,6 +851,7 @@ function InstallationForm({
   initial,
   fetchAuditEvents,
   fetchServiceVisits,
+  onAddContractor,
   onSave,
   onCancel,
   onDelete,
@@ -849,6 +867,7 @@ function InstallationForm({
   initial?: Installation;
   fetchAuditEvents?: (installationId: string) => Promise<AuditEvent[]>;
   fetchServiceVisits?: (installationId: string) => Promise<ServiceVisit[]>;
+  onAddContractor: (name: string) => Promise<string>;
   onSave: (r: Installation) => Promise<void>;
   onCancel: () => void;
   onDelete?: (r: Installation) => Promise<void>;
@@ -874,6 +893,10 @@ function InstallationForm({
   const [showNotesPhotos, setShowNotesPhotos] = useState(() => Boolean(initial?.remarks || initial?.photos.length));
   const [noteComponentId, setNoteComponentId] = useState<string>();
   const [deleteComponentId, setDeleteComponentId] = useState<string>();
+  const [addingContractor, setAddingContractor] = useState(false);
+  const [newContractorName, setNewContractorName] = useState("");
+  const [contractorSaving, setContractorSaving] = useState(false);
+  const [contractorError, setContractorError] = useState("");
   const [showExitModal, setShowExitModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [triedSubmit, setTriedSubmit] = useState(false);
@@ -948,6 +971,20 @@ function InstallationForm({
   function addBeneficiaryContact() { patch({ beneficiaryContacts: [...beneficiaryContacts, contactDraft()] }); }
   function beneficiaryContactPatch(id: string, data: Partial<BeneficiaryContact>) { patch({ beneficiaryContacts: beneficiaryContacts.map((contact) => contact.id === id ? { ...contact, ...data } : contact) }); }
   function removeBeneficiaryContact(id: string) { patch({ beneficiaryContacts: beneficiaryContacts.filter((contact) => contact.id !== id) }); }
+  async function submitNewContractor() {
+    if (contractorSaving) return;
+    setContractorSaving(true); setContractorError("");
+    try {
+      const name = await onAddContractor(newContractorName);
+      patch({ contractor: name });
+      setNewContractorName("");
+      setAddingContractor(false);
+    } catch (error) {
+      setContractorError(errorMessage(error, "Unable to add contractor."));
+    } finally {
+      setContractorSaving(false);
+    }
+  }
   function photos(e: ChangeEvent<HTMLInputElement>) { const files = Array.from(e.target.files ?? []).slice(0, 4); patch({ photos: [...record.photos, ...files.map((file) => ({ name: file.name, url: URL.createObjectURL(file) }))] }); }
   async function openAudit() {
     setTab("audit");
@@ -1008,7 +1045,7 @@ function InstallationForm({
         <label>Site name<input required className="field" value={record.siteName} onChange={(e) => patch({ siteName: e.target.value })} placeholder="Workplace site name" /></label>
         <label>School ID<input required className="field" value={record.id} onChange={(e) => patch({ id: e.target.value })} placeholder="School ID" /></label>
         <label>Solution<select className="select" value={record.unitType} onChange={(e) => patch({ unitType: e.target.value })}>{activeOptions(refs.unitTypes, record.unitType).map((x) => <option key={x.id}>{x.name}</option>)}</select></label>
-        <label>Contractor<select className="select" value={record.contractor} onChange={(e) => patch({ contractor: e.target.value })}>{activeOptions(refs.contractors, record.contractor).map((x) => <option key={x.id}>{x.name}</option>)}</select></label>
+        <div><label>Contractor<select className="select" value={record.contractor} onChange={(e) => { if (e.target.value === addContractorOption) { setAddingContractor(true); setContractorError(""); return; } patch({ contractor: e.target.value }); }}>{activeOptions(refs.contractors, record.contractor).map((x) => <option key={x.id}>{x.name}</option>)}<option value={addContractorOption}>+ Add contractor</option></select></label>{addingContractor && <div style={{ display: "grid", gap: 8, marginTop: 8 }}><input className="field" value={newContractorName} onChange={(e) => setNewContractorName(e.target.value)} placeholder="New contractor name" disabled={contractorSaving} /><div className="toolbar"><button type="button" className="button" disabled={contractorSaving} onClick={() => { setAddingContractor(false); setNewContractorName(""); setContractorError(""); }}>Cancel</button><button type="button" className="button primary" disabled={contractorSaving || !newContractorName.trim()} onClick={() => void submitNewContractor()}>{contractorSaving ? "Adding..." : "Add and select"}</button></div>{contractorError && <div className="small validation-copy">{contractorError}</div>}</div>}</div>
         <label>Installer / Team lead<input className="field" value={record.installerTeamLead} onChange={(e) => patch({ installerTeamLead: e.target.value })} placeholder="Installer or team lead name" /></label>
         <label>Installation date<input required className="field" type="date" value={record.installDate} onChange={(e) => patch({ installDate: e.target.value })} /></label>
         <label>Activation date<input className="field" type="date" value={record.activationDate ?? ""} placeholder={today()} onChange={(e) => patch({ activationDate: e.target.value || undefined })} /></label>
