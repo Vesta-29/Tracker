@@ -108,6 +108,7 @@ export type Installation = {
   unitType: string;
   contractor: string;
   installDate: string;
+  activationDate?: string;
   status: Status;
   islandGroup: IslandGroup | "";
   region: string;
@@ -118,7 +119,11 @@ export type Installation = {
   municipalityCode: string;
   barangay: string;
   barangayCode: string;
-  address: string;
+  longitude: string;
+  latitude: string;
+  beneficiaryName: string;
+  beneficiaryRole: string;
+  beneficiaryPhone: string;
   remarks: string;
   components: Component[];
   customValues: InstallationCustomValue;

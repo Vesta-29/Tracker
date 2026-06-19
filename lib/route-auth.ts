@@ -21,6 +21,7 @@ export async function requireProfile(roles?: Profile["role"][]) {
 
 export async function requireDisplayId(table: "installations" | "service_visits", displayId: string) {
   const supabase = await getSupabaseServer();
-  const { data } = await supabase.from(table).select("display_id").eq("display_id", displayId).maybeSingle();
+  const column = table === "installations" ? "school_id" : "display_id";
+  const { data } = await supabase.from(table).select(column).eq(column, displayId).maybeSingle();
   if (!data) notFound();
 }

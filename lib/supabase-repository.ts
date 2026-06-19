@@ -188,7 +188,7 @@ async function mapVisit(row: any): Promise<ServiceVisit> {
 }
 async function mapInstallation(row: any, locationNames: Map<string, string>): Promise<Installation> {
   const location = { islandGroup: getIslandGroup(row.region_code) || "", region: locationNames.get(row.region_code) || "", regionCode: row.region_code, province: locationNames.get(row.province_code) || "", provinceCode: row.province_code || "", municipality: locationNames.get(row.municipality_code) || "", municipalityCode: row.municipality_code, barangay: locationNames.get(row.barangay_code) || "", barangayCode: row.barangay_code };
-  return { id: row.display_id, dbId: row.id, siteName: row.site_name || "", legacyKitNumber: row.kit_number || undefined, unitType: value(row.unitType)?.name || "", contractor: value(row.contractor)?.name || "", installDate: row.install_date, status: row.status, ...location, address: row.address || "", remarks: row.remarks || "", components: row.installation_components.map(mapComponent), customValues: Object.fromEntries(row.installation_custom_values.map((item: any) => [item.field_id, item.value])), photos: await signedPhotos("installation-photos", row.installation_photos), createdBy: value(row.createdBy)?.full_name || "System", createdAt: row.created_at, updatedBy: value(row.updatedBy)?.full_name || "System", updatedAt: row.updated_at, serviceVisits: await Promise.all((row.service_visits || []).map(mapVisit)), auditEvents: (row.audit_events || []).map(mapAudit) };
+  return { id: row.school_id, dbId: row.id, siteName: row.site_name || "", legacyKitNumber: row.kit_number || undefined, unitType: value(row.unitType)?.name || "", contractor: value(row.contractor)?.name || "", installDate: row.install_date, activationDate: row.activation_date || undefined, status: row.status, ...location, longitude: row.longitude === null || row.longitude === undefined ? "" : String(row.longitude), latitude: row.latitude === null || row.latitude === undefined ? "" : String(row.latitude), beneficiaryName: row.beneficiary_name || "", beneficiaryRole: row.beneficiary_role || "", beneficiaryPhone: row.beneficiary_phone || "", remarks: row.remarks || "", components: row.installation_components.map(mapComponent), customValues: Object.fromEntries(row.installation_custom_values.map((item: any) => [item.field_id, item.value])), photos: await signedPhotos("installation-photos", row.installation_photos), createdBy: value(row.createdBy)?.full_name || "System", createdAt: row.created_at, updatedBy: value(row.updatedBy)?.full_name || "System", updatedAt: row.updated_at, serviceVisits: await Promise.all((row.service_visits || []).map(mapVisit)), auditEvents: (row.audit_events || []).map(mapAudit) };
 }
 async function locationNamesFor(rows: any[]) {
   const codes = [...new Set(rows.flatMap((row) => [row.region_code, row.province_code, row.municipality_code, row.barangay_code]).filter(Boolean))];
@@ -198,12 +198,12 @@ async function locationNamesFor(rows: any[]) {
 }
 function mapInstallationSummary(row: any, locationNames: Map<string, string>): Installation {
   return {
-    id: row.display_id, dbId: row.id, siteName: row.site_name || "", legacyKitNumber: row.kit_number || undefined,
-    unitType: value(row.unitType)?.name || "", contractor: value(row.contractor)?.name || "", installDate: row.install_date, status: row.status,
+    id: row.school_id, dbId: row.id, siteName: row.site_name || "", legacyKitNumber: row.kit_number || undefined,
+    unitType: value(row.unitType)?.name || "", contractor: value(row.contractor)?.name || "", installDate: row.install_date, activationDate: row.activation_date || undefined, status: row.status,
     islandGroup: getIslandGroup(row.region_code) || "", region: locationNames.get(row.region_code) || "", regionCode: row.region_code,
     province: locationNames.get(row.province_code) || "", provinceCode: row.province_code || "", municipality: locationNames.get(row.municipality_code) || "",
     municipalityCode: row.municipality_code, barangay: locationNames.get(row.barangay_code) || "", barangayCode: row.barangay_code,
-    address: row.address || "", remarks: row.remarks || "", components: row.installation_components ?? [],
+    longitude: row.longitude === null || row.longitude === undefined ? "" : String(row.longitude), latitude: row.latitude === null || row.latitude === undefined ? "" : String(row.latitude), beneficiaryName: row.beneficiary_name || "", beneficiaryRole: row.beneficiary_role || "", beneficiaryPhone: row.beneficiary_phone || "", remarks: row.remarks || "", components: row.installation_components ?? [],
     customValues: Object.fromEntries((row.installation_custom_values || []).map((item: any) => [item.field_id, item.value])),
     photos: [], createdBy: value(row.createdBy)?.full_name || "System", createdAt: row.created_at, updatedBy: value(row.updatedBy)?.full_name || "System",
     updatedAt: row.updated_at, serviceVisits: row.service_visits ?? [], auditEvents: [],
@@ -212,7 +212,7 @@ function mapInstallationSummary(row: any, locationNames: Map<string, string>): I
 
 export async function loadInstallationSummaries() {
   const { data, error } = await supabase().from("installations").select(`
-    id,display_id,site_name,kit_number,install_date,status,region_code,province_code,municipality_code,barangay_code,address,remarks,created_at,updated_at,
+    id,school_id,site_name,kit_number,install_date,activation_date,status,region_code,province_code,municipality_code,barangay_code,longitude,latitude,beneficiary_name,beneficiary_role,beneficiary_phone,remarks,created_at,updated_at,
     unitType:unit_types(name),contractor:contractors(name),createdBy:profiles!installations_created_by_fkey(full_name),updatedBy:profiles!installations_updated_by_fkey(full_name),
     installation_custom_values(field_id,value),installation_components(id)
   `).order("install_date", { ascending: false });
@@ -223,7 +223,7 @@ export async function loadInstallationSummaries() {
 
 export async function loadServiceVisitSummaries() {
   const { data, error } = await supabase().from("installations").select(`
-    id,display_id,site_name,kit_number,install_date,status,region_code,province_code,municipality_code,barangay_code,address,remarks,created_at,updated_at,
+    id,school_id,site_name,kit_number,install_date,activation_date,status,region_code,province_code,municipality_code,barangay_code,longitude,latitude,beneficiary_name,beneficiary_role,beneficiary_phone,remarks,created_at,updated_at,
     unitType:unit_types(name),contractor:contractors(name),createdBy:profiles!installations_created_by_fkey(full_name),updatedBy:profiles!installations_updated_by_fkey(full_name),
     installation_components(id),
     service_visits(id,display_id,status,ticket_reference,scheduled_date,completed_date,notes,created_at,updated_at,type:service_visit_types(name),contractor:contractors(name),createdBy:profiles!service_visits_created_by_fkey(full_name),updatedBy:profiles!service_visits_updated_by_fkey(full_name))
@@ -248,22 +248,22 @@ export async function loadInstallations() {
 }
 
 export async function loadInstallationByDisplayId(displayId: string) {
-  const { data, error } = await supabase().from("installations").select(installationDetailSelect).eq("display_id", displayId).maybeSingle();
+  const { data, error } = await supabase().from("installations").select(installationDetailSelect).eq("school_id", displayId).maybeSingle();
   if (error) throw error;
-  if (!data) throw new Error(`Site ${displayId} was not found.`);
+  if (!data) throw new Error(`School ID ${displayId} was not found.`);
   return mapInstallation(data, await locationNamesFor([data]));
 }
 
 export async function loadInstallationDuplicateValidationRecords() {
   const { data, error } = await supabase().from("installations").select(`
-    id,display_id,site_name,
+    id,school_id,site_name,
     installation_components(id,notes,installed_at,removed_at,installed_via_visit_id,removed_via_visit_id,type:component_types(name),installation_component_values(field_definition_id,value,duplicate_mac_acknowledged))
   `);
   if (error) throw error;
   return data.map((row) => ({
-    id: row.display_id, dbId: row.id, siteName: row.site_name || "", unitType: "", contractor: "", installDate: "", status: "scheduled" as const,
+    id: row.school_id, dbId: row.id, siteName: row.site_name || "", unitType: "", contractor: "", installDate: "", status: "scheduled" as const,
     islandGroup: "" as const, region: "", regionCode: "", province: "", provinceCode: "", municipality: "", municipalityCode: "", barangay: "", barangayCode: "",
-    address: "", remarks: "", components: row.installation_components.map(mapComponent), customValues: {}, photos: [], createdBy: "", createdAt: "", updatedBy: "",
+    longitude: "", latitude: "", beneficiaryName: "", beneficiaryRole: "", beneficiaryPhone: "", remarks: "", components: row.installation_components.map(mapComponent), customValues: {}, photos: [], createdBy: "", createdAt: "", updatedBy: "",
     updatedAt: "", serviceVisits: [], auditEvents: [],
   }));
 }
@@ -291,7 +291,7 @@ export async function loadInstallationForVisitDisplayId(displayId: string) {
 
 export async function loadInstallationValidationRecords() {
   const { data, error } = await supabase().from("installations").select(`
-    id,display_id,site_name,kit_number,install_date,status,region_code,province_code,municipality_code,barangay_code,address,remarks,created_at,updated_at,
+    id,school_id,site_name,kit_number,install_date,activation_date,status,region_code,province_code,municipality_code,barangay_code,longitude,latitude,beneficiary_name,beneficiary_role,beneficiary_phone,remarks,created_at,updated_at,
     unitType:unit_types(name),contractor:contractors(name),createdBy:profiles!installations_created_by_fkey(full_name),updatedBy:profiles!installations_updated_by_fkey(full_name),
     installation_custom_values(field_id,value),installation_components(*,type:component_types(name),installation_component_values(field_definition_id,value,duplicate_mac_acknowledged))
   `).order("install_date", { ascending: false });
@@ -323,6 +323,11 @@ export async function bulkUpdateInstallations(ids: string[], changes: { status?:
     payload.contractor_id = data.id;
   }
   const { error } = await client.from("installations").update(payload).in("id", ids);
+  if (error) throw error;
+}
+export async function deleteInstallation(displayId: string) {
+  const { error } = await supabase().rpc("delete_installation_permanently", { target_school_id: displayId });
+  if (error && String(error.message).includes("delete_installation_permanently")) throw new Error("Apply the latest Supabase migration before deleting site records.");
   if (error) throw error;
 }
 export async function saveVisit(installation: Installation, visit: ServiceVisit, components: Component[]) {
@@ -368,9 +373,9 @@ export async function persistReferences(refs: ReferenceData, previous?: Referenc
   invalidateReferencesCache();
 }
 
-export async function deleteReferencePermanently(kind: "siteStatus" | "contractor" | "unitType" | "customField" | "componentType" | "equipmentField", id: string) {
-  const functions = { siteStatus: "delete_installation_status_permanently", contractor: "delete_contractor_permanently", unitType: "delete_unit_type_permanently", customField: "delete_custom_field_permanently", componentType: "delete_component_type_permanently", equipmentField: "delete_equipment_field_permanently" } as const;
-  const args = { siteStatus: { target_status_id: id }, contractor: { target_contractor_id: id }, unitType: { target_unit_type_id: id }, customField: { target_field_id: id }, componentType: { target_component_type_id: id }, equipmentField: { target_library_field_id: id } } as const;
+export async function deleteReferencePermanently(kind: "siteStatus" | "contractor" | "unitType" | "customField" | "componentType" | "equipmentField" | "componentFieldAttachment", id: string) {
+  const functions = { siteStatus: "delete_installation_status_permanently", contractor: "delete_contractor_permanently", unitType: "delete_unit_type_permanently", customField: "delete_custom_field_permanently", componentType: "delete_component_type_permanently", equipmentField: "delete_equipment_field_permanently", componentFieldAttachment: "delete_component_field_attachment" } as const;
+  const args = { siteStatus: { target_status_id: id }, contractor: { target_contractor_id: id }, unitType: { target_unit_type_id: id }, customField: { target_field_id: id }, componentType: { target_component_type_id: id }, equipmentField: { target_library_field_id: id }, componentFieldAttachment: { target_field_definition_id: id } } as const;
   const { error } = await supabase().rpc(functions[kind], args[kind]);
   if (error) throw error;
 }
