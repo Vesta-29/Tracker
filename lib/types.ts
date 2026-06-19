@@ -107,6 +107,7 @@ export type Installation = {
   legacyKitNumber?: string;
   unitType: string;
   contractor: string;
+  installerTeamLead: string;
   installDate: string;
   activationDate?: string;
   status: Status;
@@ -119,8 +120,8 @@ export type Installation = {
   municipalityCode: string;
   barangay: string;
   barangayCode: string;
-  longitude: string;
-  latitude: string;
+  plusCode: string;
+  beneficiaryContacts: BeneficiaryContact[];
   beneficiaryName: string;
   beneficiaryRole: string;
   beneficiaryPhone: string;
@@ -134,6 +135,13 @@ export type Installation = {
   updatedAt: string;
   serviceVisits: ServiceVisit[];
   auditEvents: AuditEvent[];
+};
+
+export type BeneficiaryContact = {
+  id: string;
+  name: string;
+  role: string;
+  phone: string;
 };
 
 export type ReferenceData = {

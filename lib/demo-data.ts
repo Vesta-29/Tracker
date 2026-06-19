@@ -57,9 +57,9 @@ export const defaultReferences: ReferenceData = {
 
 export const demoInstallations: Installation[] = [
   {
-    id: "INS-2026-0018", siteName: "", legacyKitNumber: "KIT-10482", unitType: "Satellite broadband", contractor: "Lighthouse Network Services",
+    id: "INS-2026-0018", siteName: "", legacyKitNumber: "KIT-10482", unitType: "Satellite broadband", contractor: "Lighthouse Network Services", installerTeamLead: "",
     installDate: "2026-05-28", status: "installed", ...cebuLahug,
-    longitude: "", latitude: "", beneficiaryName: "", beneficiaryRole: "", beneficiaryPhone: "", remarks: "Activation confirmed.", createdBy: "Maria Santos", createdAt: "2026-05-28T09:10:00", updatedBy: "Maria Santos",
+    plusCode: "", beneficiaryContacts: [], beneficiaryName: "", beneficiaryRole: "", beneficiaryPhone: "", remarks: "Activation confirmed.", createdBy: "Maria Santos", createdAt: "2026-05-28T09:10:00", updatedBy: "Maria Santos",
     updatedAt: "2026-05-28T10:31:00", photos: [], customValues: { "field-work-order": "WO-260528-14", "field-priority": "Standard" }, components: [
       { id: "C-1", type: "Dish antenna", values: { "dish-serial": "DSH-62884" }, notes: "", installedAt: "2026-05-28T09:10:00" },
       { id: "C-2", type: "Modem", values: { "modem-serial": "MDM-81124", "modem-mac": "A4:5E:60:11:28:9C" }, notes: "", installedAt: "2026-05-28T09:10:00" },
@@ -68,9 +68,9 @@ export const demoInstallations: Installation[] = [
     auditEvents: [{ id: "AUDIT-001", action: "created", actor: "Maria Santos", createdAt: "2026-05-28T09:10:00", summary: "Maria Santos created this site record." }, { id: "AUDIT-002", action: "updated", actor: "Maria Santos", createdAt: "2026-05-28T10:31:00", summary: "Maria Santos updated status from Scheduled to Installed.", changedFields: ["status"], beforeData: { status: "scheduled" }, afterData: { status: "installed" } }],
   },
   {
-    id: "INS-2026-0017", siteName: "", legacyKitNumber: "KIT-10479", unitType: "Fixed wireless", contractor: "Northline Systems",
+    id: "INS-2026-0017", siteName: "", legacyKitNumber: "KIT-10479", unitType: "Fixed wireless", contractor: "Northline Systems", installerTeamLead: "",
     installDate: "2026-05-27", status: "issue", ...bulacanMuzon,
-    longitude: "", latitude: "", beneficiaryName: "", beneficiaryRole: "", beneficiaryPhone: "", remarks: "Waiting for replacement outdoor radio.", createdBy: "Maria Santos", createdAt: "2026-05-27T13:12:00", updatedBy: "Jon Reyes",
+    plusCode: "", beneficiaryContacts: [], beneficiaryName: "", beneficiaryRole: "", beneficiaryPhone: "", remarks: "Waiting for replacement outdoor radio.", createdBy: "Maria Santos", createdAt: "2026-05-27T13:12:00", updatedBy: "Jon Reyes",
     updatedAt: "2026-05-28T08:20:00", photos: [], customValues: { "field-priority": "High priority" }, components: [
       { id: "C-3", type: "Outdoor radio", values: { "radio-serial": "ODR-30295", "radio-mac": "10:62:E5:40:19:AF" }, notes: "Intermittent signal", installedAt: "2026-05-27T13:12:00" },
     ],
@@ -78,9 +78,9 @@ export const demoInstallations: Installation[] = [
     auditEvents: [{ id: "AUDIT-003", action: "created", actor: "Maria Santos", createdAt: "2026-05-27T13:12:00", summary: "Maria Santos created this site record." }, { id: "AUDIT-004", action: "updated", actor: "Jon Reyes", createdAt: "2026-05-28T08:20:00", summary: "Jon Reyes updated 2 site details: status and remarks.", changedFields: ["status", "remarks"], beforeData: { status: "installed" }, afterData: { status: "issue" } }],
   },
   {
-    id: "INS-2026-0016", siteName: "", legacyKitNumber: "KIT-10474", unitType: "Satellite broadband", contractor: "Pacific Link Solutions",
+    id: "INS-2026-0016", siteName: "", legacyKitNumber: "KIT-10474", unitType: "Satellite broadband", contractor: "Pacific Link Solutions", installerTeamLead: "",
     installDate: "2026-05-26", status: "installed", ...albayRawis,
-    longitude: "", latitude: "", beneficiaryName: "", beneficiaryRole: "", beneficiaryPhone: "", remarks: "", createdBy: "Jon Reyes", createdAt: "2026-05-26T15:40:00", updatedBy: "Jon Reyes",
+    plusCode: "", beneficiaryContacts: [], beneficiaryName: "", beneficiaryRole: "", beneficiaryPhone: "", remarks: "", createdBy: "Jon Reyes", createdAt: "2026-05-26T15:40:00", updatedBy: "Jon Reyes",
     updatedAt: "2026-05-26T16:44:00", photos: [], customValues: {}, components: [
       { id: "C-4", type: "Dish antenna", values: { "dish-serial": "DSH-62010" }, notes: "", installedAt: "2026-05-26T15:40:00" },
       { id: "C-5", type: "Router", values: { "router-serial": "RTR-78426" }, notes: "", installedAt: "2026-05-26T15:40:00" },
@@ -88,21 +88,21 @@ export const demoInstallations: Installation[] = [
     serviceVisits: [], auditEvents: [{ id: "AUDIT-005", action: "created", actor: "Jon Reyes", createdAt: "2026-05-26T15:40:00", summary: "Jon Reyes created this site record." }],
   },
   {
-    id: "INS-2026-0015", siteName: "", legacyKitNumber: "KIT-10471", unitType: "Fiber internet", contractor: "SignalWorks PH",
+    id: "INS-2026-0015", siteName: "", legacyKitNumber: "KIT-10471", unitType: "Fiber internet", contractor: "SignalWorks PH", installerTeamLead: "",
     installDate: "2026-05-26", status: "scheduled", ...lagunaCanlubang,
-    longitude: "", latitude: "", beneficiaryName: "", beneficiaryRole: "", beneficiaryPhone: "", remarks: "Site access confirmed for morning schedule.", createdBy: "Jon Reyes", createdAt: "2026-05-26T09:15:00", updatedBy: "Jon Reyes",
+    plusCode: "", beneficiaryContacts: [], beneficiaryName: "", beneficiaryRole: "", beneficiaryPhone: "", remarks: "Site access confirmed for morning schedule.", createdBy: "Jon Reyes", createdAt: "2026-05-26T09:15:00", updatedBy: "Jon Reyes",
     updatedAt: "2026-05-26T09:15:00", photos: [], customValues: {}, components: [], serviceVisits: [], auditEvents: [{ id: "AUDIT-006", action: "created", actor: "Jon Reyes", createdAt: "2026-05-26T09:15:00", summary: "Jon Reyes created this site record." }],
   },
   {
-    id: "INS-2026-0014", siteName: "", legacyKitNumber: "KIT-10465", unitType: "Fixed wireless", contractor: "Northline Systems",
+    id: "INS-2026-0014", siteName: "", legacyKitNumber: "KIT-10465", unitType: "Fixed wireless", contractor: "Northline Systems", installerTeamLead: "",
     installDate: "2026-05-24", status: "cancelled", ...angelesBalibago,
-    longitude: "", latitude: "", beneficiaryName: "", beneficiaryRole: "", beneficiaryPhone: "", remarks: "Cancelled by site coordinator.", createdBy: "Maria Santos", createdAt: "2026-05-24T13:44:00", updatedBy: "Maria Santos",
+    plusCode: "", beneficiaryContacts: [], beneficiaryName: "", beneficiaryRole: "", beneficiaryPhone: "", remarks: "Cancelled by site coordinator.", createdBy: "Maria Santos", createdAt: "2026-05-24T13:44:00", updatedBy: "Maria Santos",
     updatedAt: "2026-05-25T11:12:00", photos: [], customValues: {}, components: [], serviceVisits: [], auditEvents: [{ id: "AUDIT-007", action: "created", actor: "Maria Santos", createdAt: "2026-05-24T13:44:00", summary: "Maria Santos created this site record." }],
   },
   {
-    id: "INS-2026-0013", siteName: "", legacyKitNumber: "KIT-10458", unitType: "Satellite broadband", contractor: "Lighthouse Network Services",
+    id: "INS-2026-0013", siteName: "", legacyKitNumber: "KIT-10458", unitType: "Satellite broadband", contractor: "Lighthouse Network Services", installerTeamLead: "",
     installDate: "2026-05-23", status: "installed", ...batangasSabang,
-    longitude: "", latitude: "", beneficiaryName: "", beneficiaryRole: "", beneficiaryPhone: "", remarks: "", createdBy: "Maria Santos", createdAt: "2026-05-23T15:10:00", updatedBy: "Maria Santos",
+    plusCode: "", beneficiaryContacts: [], beneficiaryName: "", beneficiaryRole: "", beneficiaryPhone: "", remarks: "", createdBy: "Maria Santos", createdAt: "2026-05-23T15:10:00", updatedBy: "Maria Santos",
     updatedAt: "2026-05-23T15:10:00", photos: [], customValues: {}, components: [], serviceVisits: [], auditEvents: [{ id: "AUDIT-008", action: "created", actor: "Maria Santos", createdAt: "2026-05-23T15:10:00", summary: "Maria Santos created this site record." }],
   },
 ];

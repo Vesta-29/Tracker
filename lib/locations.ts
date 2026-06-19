@@ -54,24 +54,24 @@ export function listMuncities(provinceCode?: string) { const province = province
 export function listBarangays(municipalityCode?: string) { const municipality = municipalityCode ? muncityByCode.get(municipalityCode) : undefined; return municipality ? barangays.filter((row) => row.munCityCode === municipality.munCityCode) : municipalityCode ? [] : [...barangays]; }
 export function getIslandGroup(regionCode: string) { return regionByCode.get(regionCode)?.islandGroup; }
 
-function selection(region: Region, province: Province, municipality: Muncity, barangay: Barangay): LocationSelection {
-  return { islandGroup: region.islandGroup, region: region.regionName, regionCode: region.psgcCode, province: province.provName, provinceCode: province.psgcCode, municipality: municipality.munCityName, municipalityCode: municipality.psgcCode, barangay: barangay.brgyName, barangayCode: barangay.psgcCode };
+function selection(region: Region, province: Province, municipality: Muncity, barangay?: Barangay): LocationSelection {
+  return { islandGroup: region.islandGroup, region: region.regionName, regionCode: region.psgcCode, province: province.provName, provinceCode: province.psgcCode, municipality: municipality.munCityName, municipalityCode: municipality.psgcCode, barangay: barangay?.brgyName ?? "", barangayCode: barangay?.psgcCode ?? "" };
 }
 
 export function resolveLocation(input: LocationInput): LocationResolution {
   const hasCodes = Boolean(input.regionCode || input.provinceCode || input.municipalityCode || input.barangayCode);
   if (hasCodes) {
-    if (!input.regionCode || !input.provinceCode || !input.municipalityCode || !input.barangayCode) return { issue: "Complete all PSGC code columns" };
-    const region = regionByCode.get(input.regionCode); const province = provinceByCode.get(input.provinceCode); const municipality = muncityByCode.get(input.municipalityCode); const barangay = barangayByCode.get(input.barangayCode);
-    if (!region || !province || !municipality || !barangay) return { issue: "Invalid PSGC location code" };
-    if (!listProvinces(region.psgcCode).some((row) => row.psgcCode === province.psgcCode) || !listMuncities(province.psgcCode).some((row) => row.psgcCode === municipality.psgcCode) || !listBarangays(municipality.psgcCode).some((row) => row.psgcCode === barangay.psgcCode)) return { issue: "PSGC location codes do not form a valid path" };
+    if (!input.regionCode || !input.provinceCode || !input.municipalityCode) return { issue: "Complete Region, Province, and Locality code columns" };
+    const region = regionByCode.get(input.regionCode); const province = provinceByCode.get(input.provinceCode); const municipality = muncityByCode.get(input.municipalityCode); const barangay = input.barangayCode ? barangayByCode.get(input.barangayCode) : undefined;
+    if (!region || !province || !municipality || (input.barangayCode && !barangay)) return { issue: "Invalid PSGC location code" };
+    if (!listProvinces(region.psgcCode).some((row) => row.psgcCode === province.psgcCode) || !listMuncities(province.psgcCode).some((row) => row.psgcCode === municipality.psgcCode) || (barangay && !listBarangays(municipality.psgcCode).some((row) => row.psgcCode === barangay.psgcCode))) return { issue: "PSGC location codes do not form a valid path" };
     return { location: selection(region, province, municipality, barangay) };
   }
-  if (!input.region || !input.province || !input.municipality || !input.barangay) return { issue: "Complete Region, Province, Locality, and Barangay" };
+  if (!input.region || !input.province || !input.municipality) return { issue: "Complete Region, Province, and Locality" };
   const candidates = regions.flatMap((region) => matchesName(region.regionName, input.region) && matchesName(region.islandGroup, input.islandGroup)
     ? listProvinces(region.psgcCode).flatMap((province) => matchesName(province.provName, input.province)
       ? listMuncities(province.psgcCode).flatMap((municipality) => matchesName(municipality.munCityName, input.municipality)
-        ? listBarangays(municipality.psgcCode).filter((barangay) => matchesName(barangay.brgyName, input.barangay)).map((barangay) => selection(region, province, municipality, barangay))
+        ? input.barangay ? listBarangays(municipality.psgcCode).filter((barangay) => matchesName(barangay.brgyName, input.barangay)).map((barangay) => selection(region, province, municipality, barangay)) : [selection(region, province, municipality)]
         : [])
       : [])
     : []);
