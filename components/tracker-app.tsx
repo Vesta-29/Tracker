@@ -925,17 +925,25 @@ function InstallationForm({
     return () => { active = false; window.clearTimeout(timer); };
   }, [record.siteName, schoolLookupOpen]);
 
-  function selectDirectorySchool(entry: SchoolDirectoryEntry) {
+  async function selectDirectorySchool(entry: SchoolDirectoryEntry) {
+    let selected = entry;
+    let resolutionIssue = entry.warning;
+    if (!entry.regionCode || !entry.provinceCode || !entry.municipalityCode) {
+      const { resolveLocation } = await import("@/lib/locations");
+      const resolution = resolveLocation({ islandGroup: entry.islandGroup, region: entry.region, province: entry.province, municipality: entry.municipality, barangay: entry.barangay });
+      if (resolution.location) { selected = { ...entry, ...resolution.location, warning: "" }; resolutionIssue = ""; }
+      else resolutionIssue = resolution.issue || entry.warning;
+    }
     const next: Partial<Installation> = {};
-    if (!initial?.siteName && !original.siteName) next.siteName = entry.schoolName;
-    if (!record.id.trim() && entry.schoolId) next.id = entry.schoolId;
-    const resolved = Boolean(entry.regionCode && entry.provinceCode && entry.municipalityCode);
-    const compatible = resolved && [[record.regionCode, entry.regionCode], [record.provinceCode, entry.provinceCode], [record.municipalityCode, entry.municipalityCode], [record.barangayCode, entry.barangayCode]].every(([current, incoming]) => !current || !incoming || current === incoming);
+    if (!initial?.siteName && !original.siteName) next.siteName = selected.schoolName;
+    if (!record.id.trim() && selected.schoolId) next.id = selected.schoolId;
+    const resolved = Boolean(selected.regionCode && selected.provinceCode && selected.municipalityCode);
+    const compatible = resolved && [[record.regionCode, selected.regionCode], [record.provinceCode, selected.provinceCode], [record.municipalityCode, selected.municipalityCode], [record.barangayCode, selected.barangayCode]].every(([current, incoming]) => !current || !incoming || current === incoming);
     if (compatible) {
       const locationFields = ["islandGroup", "region", "regionCode", "province", "provinceCode", "municipality", "municipalityCode", "barangay", "barangayCode"] as const;
-      for (const field of locationFields) if (!record[field] && entry[field]) (next as Record<string, unknown>)[field] = entry[field];
-      setSchoolLookupNotice(entry.warning ? `School selected. ${entry.warning}` : "School directory data filled available blank fields.");
-    } else if (!resolved) setSchoolLookupNotice("School selected, but its spreadsheet location could not be matched to PSGC data.");
+      for (const field of locationFields) if (!record[field] && selected[field]) (next as Record<string, unknown>)[field] = selected[field];
+      setSchoolLookupNotice("School directory data filled available blank fields.");
+    } else if (!resolved) setSchoolLookupNotice(`School selected, but its spreadsheet location could not be matched to PSGC data.${resolutionIssue ? ` ${resolutionIssue}` : ""}`);
     else setSchoolLookupNotice("School selected. Existing location values were preserved because they differ from the directory.");
     patch(next);
     setSchoolLookupOpen(false);
@@ -946,7 +954,7 @@ function InstallationForm({
     if (!schoolLookupOpen || !schoolMatches.length) return;
     if (event.key === "ArrowDown") { event.preventDefault(); setSchoolLookupIndex((index) => (index + 1) % schoolMatches.length); }
     else if (event.key === "ArrowUp") { event.preventDefault(); setSchoolLookupIndex((index) => (index - 1 + schoolMatches.length) % schoolMatches.length); }
-    else if (event.key === "Enter") { event.preventDefault(); selectDirectorySchool(schoolMatches[schoolLookupIndex]); }
+    else if (event.key === "Enter") { event.preventDefault(); void selectDirectorySchool(schoolMatches[schoolLookupIndex]); }
     else if (event.key === "Escape") setSchoolLookupOpen(false);
   }
 
