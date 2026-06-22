@@ -46,7 +46,7 @@ const provinceByCode = byCode(provinces);
 const muncityByCode = byCode(muncities);
 const barangayByCode = byCode(barangays);
 const norm = (value?: string) => value?.trim().toLocaleLowerCase("en-PH").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, " ") ?? "";
-const locationName = (value?: string) => norm(value).replace(/^(?:city|municipality) of /, "").replace(/ (?:city|municipality)$/, "").replace(/^(?:barangay|brgy) /, "").trim();
+const locationName = (value?: string) => norm(value?.replace(/\([^)]*\)/g, " ")).replace(/^(?:city|municipality) of /, "").replace(/ (?:city|municipality)$/, "").replace(/^(?:barangay|brgy) /, "").trim();
 const matchesName = (expected: string, actual?: string) => !actual || locationName(expected) === locationName(actual);
 const regionAliases: Record<string, string[]> = {
   "01": ["region i", "region 1", "ilocos region"],
