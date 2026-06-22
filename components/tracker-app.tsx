@@ -1614,8 +1614,8 @@ function ComponentTypeSettings({ componentType: type, equipmentFields, otherType
 
 function installationRows(records: Installation[], refs: ReferenceData) {
   const fields = [...(refs.customFields ?? [])].sort((a, b) => a.order - b.order);
-  const header = ["Site Name", "School ID", "Solution", "Contractor", "Installer / Team Lead", "Install Date", "Activation Date", "Status", "Island Group", "Region", "Region Code", "Province", "Province Code", "Locality", "Locality Code", "Barangay", "Barangay Code", "Longitude", "Latitude", "Beneficiary Name", "Beneficiary Role", "Beneficiary Phone", "Additional Beneficiary Contacts", "Remarks", ...fields.map((field) => field.label)];
-  return [header, ...records.map((r) => [r.siteName, r.id, r.unitType, r.contractor, r.installerTeamLead, r.installDate, r.activationDate ?? "", r.status, r.islandGroup, r.region, r.regionCode, r.province, r.provinceCode, r.municipality, r.municipalityCode, r.barangay, r.barangayCode, r.longitude, r.latitude, r.beneficiaryName, r.beneficiaryRole, r.beneficiaryPhone, additionalBeneficiaryContactsValue(r), r.remarks, ...fields.map((field) => (r.customValues ?? {})[field.id] ?? "")])];
+  const header = ["Site Name", "School ID", "Solution", "Contractor", "Installer / Team Lead", "Install Date", "Activation Date", "Status", "Island Group", "Region", "Province", "Locality", "Barangay", "Longitude", "Latitude", "Beneficiary Name", "Beneficiary Role", "Beneficiary Phone", "Additional Beneficiary Contacts", "Remarks", ...fields.map((field) => field.label)];
+  return [header, ...records.map((r) => [r.siteName, r.id, r.unitType, r.contractor, r.installerTeamLead, r.installDate, r.activationDate ?? "", r.status, r.islandGroup, r.region, r.province, r.municipality, r.barangay, r.longitude, r.latitude, r.beneficiaryName, r.beneficiaryRole, r.beneficiaryPhone, additionalBeneficiaryContactsValue(r), r.remarks, ...fields.map((field) => (r.customValues ?? {})[field.id] ?? "")])];
 }
 
 function downloadCsv(records: Installation[], refs: ReferenceData) {
@@ -1624,11 +1624,40 @@ function downloadCsv(records: Installation[], refs: ReferenceData) {
   downloadBlob(new Blob([csv], { type: "text/csv" }), `fieldtrack-export-${today()}.csv`);
 }
 
+function exportMatchKey(value: string) { return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); }
+function isAccessPoint(type: string) { const key = exportMatchKey(type); return /(^| )ap( |$)/.test(key) || key.includes("access point"); }
+function equipmentFieldValue(component: Component | undefined, refs: ReferenceData, fieldName: "serial" | "kit") {
+  if (!component) return "";
+  const field = visibleComponentFields(refs, component).find((attachment) => { const reusable = libraryField(refs, attachment); return reusable && exportMatchKey(reusable.label).includes(fieldName); });
+  return field ? component.values?.[field.id]?.trim() || "" : "";
+}
+
+function xlsxInstallationRows(records: Installation[], refs: ReferenceData) {
+  const header = ["UNIT", "SCHOOL ID", "SITE NAME", "ISLAND GROUP", "REGION", "PROVINCE", "MUNICIPALITY", "BARANGAY", "Longitude", "Latitude", "STARLINK KIT NUMBER", "STARLINK DATE ACTIVATED", "AP 1 INDOOR SERIAL NUMBER", "AP 2 INDOOR SERIAL NUMBER", "AP 3 OUTDOOR SERIAL NUMBER", "RUIJIE ROUTER SERIAL NUMBER", "MSP", "MSP Installer/Team Lead", "DATE INSTALLED", "CONTACT PERSON NAME", "CONTACT PERSON POSITION", "CONTACT NUMBER", "REMARKS"];
+  return [header, ...records.map((record, index) => {
+    const activeComponents = record.components.filter((component) => !component.removedAt);
+    const starlink = activeComponents.find((component) => exportMatchKey(component.type).includes("starlink"));
+    const indoorAccessPoints = activeComponents.filter((component) => isAccessPoint(component.type) && exportMatchKey(component.type).includes("indoor"));
+    const outdoorAccessPoint = activeComponents.find((component) => isAccessPoint(component.type) && exportMatchKey(component.type).includes("outdoor"));
+    const ruijieRouter = activeComponents.find((component) => { const type = exportMatchKey(component.type); return type.includes("ruijie") && type.includes("router"); });
+    const contacts = beneficiaryContactList(record).filter(contactHasValue);
+    return [index + 1, record.id, record.siteName, record.islandGroup, record.region, record.province, record.municipality, record.barangay, record.longitude, record.latitude, equipmentFieldValue(starlink, refs, "kit"), record.activationDate ?? "", equipmentFieldValue(indoorAccessPoints[0], refs, "serial"), equipmentFieldValue(indoorAccessPoints[1], refs, "serial"), equipmentFieldValue(outdoorAccessPoint, refs, "serial"), equipmentFieldValue(ruijieRouter, refs, "serial"), record.contractor, record.installerTeamLead, record.installDate, contacts.map((contact) => contact.name.trim()).join("\n"), contacts.map((contact) => contact.role.trim()).join("\n"), contacts.map((contact) => contact.phone.trim()).join("\n"), record.remarks];
+  })];
+}
+
 async function downloadXlsx(records: Installation[], refs: ReferenceData) {
   const wb = await createWorkbook();
-  wb.addWorksheet("Installations").addRows(installationRows(records, refs));
-  const labels = Array.from(new Set(refs.componentTypes.flatMap((type) => (type.fields ?? []).map((field) => libraryField(refs, field)?.label).filter(Boolean) as string[])));
-  wb.addWorksheet("Components").addRows([["School ID", "Component Type", "Notes", ...labels], ...records.flatMap((record) => record.components.map((component) => { const fields = componentType(refs, component.type)?.fields ?? []; return [record.id, component.type, component.notes, ...labels.map((label) => { const field = fields.find((item) => libraryField(refs, item)?.label === label); return field ? (component.values ?? {})[field.id] ?? "" : ""; })]; }))]);
+  const worksheet = wb.addWorksheet("Installations", { views: [{ state: "frozen", ySplit: 1 }] });
+  worksheet.addRows(xlsxInstallationRows(records, refs));
+  worksheet.autoFilter = "A1:W1";
+  [8, 16, 34, 15, 26, 20, 22, 22, 14, 14, 22, 20, 24, 24, 25, 27, 24, 26, 17, 26, 24, 20, 36].forEach((width, index) => { worksheet.getColumn(index + 1).width = width; });
+  const header = worksheet.getRow(1);
+  header.height = 24;
+  header.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  header.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF245C4C" } };
+  header.alignment = { vertical: "middle", horizontal: "center" };
+  header.eachCell((cell) => { cell.border = { bottom: { style: "thin", color: { argb: "FFB7C9C1" } } }; });
+  worksheet.eachRow((row, rowNumber) => { if (rowNumber > 1) { row.alignment = { vertical: "top", wrapText: true }; row.getCell(1).alignment = { vertical: "top", horizontal: "center" }; } });
   const buffer = await wb.xlsx.writeBuffer();
   downloadBlob(new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), `fieldtrack-export-${today()}.xlsx`);
 }
