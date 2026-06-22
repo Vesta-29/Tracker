@@ -45,8 +45,37 @@ const regionByCode = byCode(regions);
 const provinceByCode = byCode(provinces);
 const muncityByCode = byCode(muncities);
 const barangayByCode = byCode(barangays);
-const norm = (value?: string) => value?.trim().toLocaleLowerCase("en-PH") ?? "";
-const matchesName = (expected: string, actual?: string) => !actual || norm(expected) === norm(actual);
+const norm = (value?: string) => value?.trim().toLocaleLowerCase("en-PH").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, " ") ?? "";
+const locationName = (value?: string) => norm(value).replace(/^(?:city|municipality) of /, "").replace(/ (?:city|municipality)$/, "").replace(/^(?:barangay|brgy) /, "").trim();
+const matchesName = (expected: string, actual?: string) => !actual || locationName(expected) === locationName(actual);
+const regionAliases: Record<string, string[]> = {
+  "01": ["region i", "region 1", "ilocos region"],
+  "02": ["region ii", "region 2", "cagayan valley"],
+  "03": ["region iii", "region 3", "central luzon"],
+  "04": ["region iv a", "region 4a", "region 4 a", "calabarzon"],
+  "05": ["region v", "region 5", "bicol region"],
+  "06": ["region vi", "region 6", "western visayas"],
+  "07": ["region vii", "region 7", "central visayas"],
+  "08": ["region viii", "region 8", "eastern visayas"],
+  "09": ["region ix", "region 9", "zamboanga peninsula"],
+  "10": ["region x", "region 10", "northern mindanao"],
+  "11": ["region xi", "region 11", "davao region"],
+  "12": ["region xii", "region 12", "soccsksargen"],
+  "13": ["ncr", "national capital region", "metro manila"],
+  "14": ["car", "cordillera administrative region", "cordillera"],
+  "16": ["region xiii", "region 13", "caraga", "caraga region"],
+  "17": ["region iv b", "region 4b", "region 4 b", "mimaropa", "mimaropa region"],
+  "18": ["nir", "negros island region"],
+  "19": ["barmm", "bangsamoro autonomous region in muslim mindanao", "bangsamoro"],
+};
+function matchesRegion(region: Region, actual?: string) {
+  if (!actual) return true;
+  const actualName = norm(actual);
+  const official = norm(region.regionName);
+  const beforeParenthesis = norm(region.regionName.replace(/\s*\([^)]*\)\s*$/, ""));
+  const insideParenthesis = norm(region.regionName.match(/\(([^)]*)\)/)?.[1]);
+  return [official, beforeParenthesis, insideParenthesis, ...(regionAliases[region.regCode] ?? []).map(norm)].filter(Boolean).includes(actualName);
+}
 
 export function listRegions(islandGroup?: string) { return islandGroup ? regions.filter((row) => row.islandGroup === islandGroup) : [...regions]; }
 export function listProvinces(regionCode?: string) { const region = regionCode ? regionByCode.get(regionCode) : undefined; return region ? provinces.filter((row) => row.regCode === region.regCode) : regionCode ? [] : [...provinces]; }
@@ -68,14 +97,17 @@ export function resolveLocation(input: LocationInput): LocationResolution {
     return { location: selection(region, province, municipality, barangay) };
   }
   if (!input.region || !input.province || !input.municipality) return { issue: "Complete Region, Province, and Locality" };
-  const candidates = regions.flatMap((region) => matchesName(region.regionName, input.region) && matchesName(region.islandGroup, input.islandGroup)
-    ? listProvinces(region.psgcCode).flatMap((province) => matchesName(province.provName, input.province)
-      ? listMuncities(province.psgcCode).flatMap((municipality) => matchesName(municipality.munCityName, input.municipality)
-        ? input.barangay ? listBarangays(municipality.psgcCode).filter((barangay) => matchesName(barangay.brgyName, input.barangay)).map((barangay) => selection(region, province, municipality, barangay)) : [selection(region, province, municipality)]
-        : [])
-      : [])
-    : []);
-  return candidates.length === 1 ? { location: candidates[0] } : { issue: candidates.length ? "Ambiguous name-only location path; add PSGC codes" : "Invalid name-only location path" };
+  const matchingRegions = regions.filter((region) => matchesRegion(region, input.region) && matchesName(region.islandGroup, input.islandGroup));
+  if (!matchingRegions.length) return { issue: `Region not recognized: ${input.region}` };
+  const matchingProvinces = matchingRegions.flatMap((region) => listProvinces(region.psgcCode).filter((province) => matchesName(province.provName, input.province)).map((province) => ({ region, province })));
+  if (!matchingProvinces.length) return { issue: `Province not recognized under ${input.region}: ${input.province}` };
+  const matchingMunicipalities = matchingProvinces.flatMap(({ region, province }) => listMuncities(province.psgcCode).filter((municipality) => matchesName(municipality.munCityName, input.municipality)).map((municipality) => ({ region, province, municipality })));
+  if (!matchingMunicipalities.length) return { issue: `Municipality not recognized under ${input.province}: ${input.municipality}` };
+  const candidates = matchingMunicipalities.flatMap(({ region, province, municipality }) => input.barangay
+    ? listBarangays(municipality.psgcCode).filter((barangay) => matchesName(barangay.brgyName, input.barangay)).map((barangay) => selection(region, province, municipality, barangay))
+    : [selection(region, province, municipality)]);
+  if (!candidates.length) return { issue: `Barangay not recognized under ${input.municipality}: ${input.barangay}` };
+  return candidates.length === 1 ? { location: candidates[0] } : { issue: "Ambiguous name-only location path; add PSGC codes" };
 }
 
 export function requireLocation(input: LocationInput) {

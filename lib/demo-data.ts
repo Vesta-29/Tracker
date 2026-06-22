@@ -9,6 +9,7 @@ const angelesBalibago = requireLocation({ regionCode: "0300000000", provinceCode
 const batangasSabang = requireLocation({ regionCode: "0400000000", provinceCode: "0401000000", municipalityCode: "0401014000", barangayCode: "0401014054" });
 
 export const defaultReferences: ReferenceData = {
+  schoolDirectory: [],
   siteStatuses: [
     { id: "status-scheduled", value: "scheduled", name: "Scheduled", active: true, order: 0 },
     { id: "status-installed", value: "installed", name: "Installed", active: true, order: 1 },

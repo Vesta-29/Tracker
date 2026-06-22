@@ -145,7 +145,35 @@ export type BeneficiaryContact = {
   phone: string;
 };
 
+export type SchoolDirectoryEntry = {
+  id: string;
+  schoolId: string;
+  schoolName: string;
+  islandGroup: IslandGroup | "";
+  region: string;
+  regionCode: string;
+  province: string;
+  provinceCode: string;
+  municipality: string;
+  municipalityCode: string;
+  barangay: string;
+  barangayCode: string;
+  sourceRow: number;
+  warning: string;
+};
+
+export type SchoolDirectoryStatus = {
+  filename: string;
+  totalRows: number;
+  completeRows: number;
+  partialRows: number;
+  skippedRows: number;
+  uploadedBy: string;
+  uploadedAt: string;
+};
+
 export type ReferenceData = {
+  schoolDirectory: ReferenceOption[];
   siteStatuses: StatusReferenceOption[];
   contractors: ReferenceOption[];
   unitTypes: ReferenceOption[];

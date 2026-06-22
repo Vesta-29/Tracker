@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import { getIslandGroup } from "@/lib/location-groups";
-import type { AuditEvent, Component, Installation, Profile, ReferenceData, ServiceVisit, Status, StatusReferenceOption } from "@/lib/types";
+import type { AuditEvent, Component, Installation, Profile, ReferenceData, SchoolDirectoryEntry, SchoolDirectoryStatus, ServiceVisit, Status, StatusReferenceOption } from "@/lib/types";
 
 const supabase = () => getSupabaseBrowser();
 const value = <T>(row: T | T[] | null | undefined) => Array.isArray(row) ? row[0] : row;
@@ -60,6 +60,45 @@ export async function listLocationOptions(level: "region" | "province" | "munici
   const options = data.map((row) => ({ code: row.psgc_code, name: row.name }));
   locationOptionsCache.set(key, options);
   return options;
+}
+
+function mapSchoolDirectoryEntry(row: any): SchoolDirectoryEntry {
+  return {
+    id: row.id,
+    schoolId: row.school_id || "",
+    schoolName: row.school_name,
+    islandGroup: row.island_group || "",
+    region: row.region_name || "",
+    regionCode: row.region_code || "",
+    province: row.province_name || "",
+    provinceCode: row.province_code || "",
+    municipality: row.municipality_name || "",
+    municipalityCode: row.municipality_code || "",
+    barangay: row.barangay_name || "",
+    barangayCode: row.barangay_code || "",
+    sourceRow: row.source_row,
+    warning: row.validation_warning || "",
+  };
+}
+
+export async function searchSchoolDirectory(query: string) {
+  const term = query.trim().replaceAll("%", "\\%").replaceAll("_", "\\_");
+  if (term.length < 2) return [];
+  const { data, error } = await supabase().from("school_directory_entries").select("id,school_id,school_name,island_group,region_name,region_code,province_name,province_code,municipality_name,municipality_code,barangay_name,barangay_code,source_row,validation_warning").ilike("school_name", `%${term}%`).order("school_name").limit(10);
+  if (error) throw error;
+  return data.map(mapSchoolDirectoryEntry);
+}
+
+export async function loadSchoolDirectoryStatus(): Promise<SchoolDirectoryStatus | null> {
+  const { data, error } = await supabase().from("school_directory_uploads").select("filename,total_rows,complete_rows,partial_rows,skipped_rows,created_at,uploader:profiles!school_directory_uploads_uploaded_by_fkey(full_name)").order("created_at", { ascending: false }).limit(1).maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return { filename: data.filename, totalRows: data.total_rows, completeRows: data.complete_rows, partialRows: data.partial_rows, skippedRows: data.skipped_rows, uploadedBy: value(data.uploader)?.full_name || "Administrator", uploadedAt: data.created_at };
+}
+
+export async function replaceSchoolDirectory(filename: string, rows: SchoolDirectoryEntry[], counts: { total: number; complete: number; partial: number; skipped: number }) {
+  const { error } = await supabase().rpc("replace_school_directory", { source_filename: filename, rows, total_count: counts.total, complete_count: counts.complete, partial_count: counts.partial, skipped_count: counts.skipped });
+  if (error) throw error;
 }
 
 async function signedPhotos(bucket: string, rows: { storage_path: string; caption?: string | null }[] = []) {
@@ -158,6 +197,7 @@ export async function loadReferences({ force = false }: { force?: boolean } = {}
     for (const result of [contractors, unitTypes, componentTypes, equipmentFields, customFields, serviceVisitTypes]) if (result.error) throw result.error;
     if (siteStatuses.error && !missingStatusReferenceTable(siteStatuses.error)) throw siteStatuses.error;
     cachedReferences = {
+      schoolDirectory: [],
       siteStatuses: siteStatuses.error ? defaultSiteStatuses : siteStatuses.data!.map((row) => ({ id: row.id, value: row.value as Status, name: row.name, active: row.active, order: row.display_order })),
       contractors: contractors.data!.map((row) => ({ id: row.id, name: row.name, active: row.active, order: row.display_order })),
       unitTypes: unitTypes.data!.map((row) => ({ id: row.id, name: row.name, active: row.active, order: row.display_order })),
