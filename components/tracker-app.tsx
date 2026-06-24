@@ -3,16 +3,17 @@
 import { ChangeEvent, Dispatch, FormEvent, PointerEvent, SetStateAction, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
-  Activity, AlertTriangle, ArrowDownAZ, ArrowUpAZ, BarChart3, CalendarRange, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleDot, ClipboardCopy, ClipboardList,
+  Activity, AlertTriangle, ArrowDownAZ, ArrowUpAZ, BarChart3, CalendarRange, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleDot, ClipboardCopy, ClipboardList, ClipboardPaste,
   Download, FileSpreadsheet, GripVertical, History, ImagePlus, KeyRound, LogOut, MessageSquareText, MoreHorizontal, Package, Pencil, Pin, Plus, Power, RadioTower, Search, Wrench,
   Trash2, Users, X
 } from "lucide-react";
 import { islandGroups, getIslandGroup } from "@/lib/location-groups";
-import { bulkUpdateInstallations, clearInvalidSession, consumeAuthCallback, createUser, deleteInstallation, deleteReferencePermanently, generateUserTemporaryPassword, getCachedUsers, listLocationOptions, listUsers, loadInstallations, loadInstallationAuditEvents, loadInstallationByDisplayId, loadInstallationDuplicateValidationRecords, loadInstallationForVisitDisplayId, loadInstallationServiceVisits, loadInstallationSummaries, loadInstallationValidationRecords, loadReferences, loadSchoolDirectoryStatus, loadServiceVisitSummaries, loadProfile, persistReferences, prefetchUsers, replaceSchoolDirectory, requestPasswordReset, saveInstallation, saveInstallationBatch, saveVisit, searchSchoolDirectory, setPassword, signIn, updateUser } from "@/lib/supabase-repository";
+import { bulkUpdateInstallations, clearInvalidSession, consumeAuthCallback, createUser, deleteInstallation, deleteReferencePermanently, extractSiteReportWithGemini, findSchoolDirectoryEntry, generateUserTemporaryPassword, getCachedUsers, listLocationOptions, listUsers, loadInstallations, loadInstallationAuditEvents, loadInstallationByDisplayId, loadInstallationDuplicateValidationRecords, loadInstallationForVisitDisplayId, loadInstallationServiceVisits, loadInstallationSummaries, loadInstallationValidationRecords, loadReferences, loadSchoolDirectoryStatus, loadServiceVisitSummaries, loadProfile, persistReferences, prefetchUsers, replaceSchoolDirectory, requestPasswordReset, saveInstallation, saveInstallationBatch, saveVisit, searchSchoolDirectory, setPassword, signIn, updateUser } from "@/lib/supabase-repository";
 import { supabaseConfigured } from "@/lib/supabase-browser";
 import { useGuardedNavigation, useNavigationBlocker } from "@/lib/guarded-navigation";
 import type { LocationOption } from "@/lib/supabase-repository";
 import type { AuditEvent, BeneficiaryContact, Component, ComponentFieldAttachment, ComponentFieldType, ComponentTypeOption, CustomFieldDefinition, CustomFieldType, EquipmentFieldLibraryItem, Installation, Profile, ReferenceData, ReferenceOption, SchoolDirectoryEntry, SchoolDirectoryStatus, ServiceVisit, ServiceVisitStatus, Status, StatusReferenceOption } from "@/lib/types";
+import { parseSiteActivationReport, type SiteReportExtraction, type SiteReportValues } from "@/lib/site-report-parser";
 
 type Page = "dashboard" | "installations" | "new" | "serviceVisits" | "import" | "settings";
 type Filter = { search: string; status: string; contractor: string; islandGroup: string; regionCode: string; provinceCode: string; municipalityCode: string; barangayCode: string; from: string; to: string; attention: "" | "missingName" | "legacyKit" };
@@ -63,6 +64,17 @@ function uuid() { return crypto.randomUUID(); }
 function today() { return new Date().toISOString().slice(0, 10); }
 function componentDraft(typeName: string, order = 0): Component { return { id: `${uid("CMP")}-${order + 1}`, type: typeName, values: {}, notes: "", installedAt: new Date().toISOString() }; }
 function defaultNewSiteComponents(refs: ReferenceData) { return orderedByDisplay(refs.componentTypes).filter((type) => type.active && type.defaultOnNewSite).map((type, index) => componentDraft(type.name, index)); }
+type ExtractionEquipmentSlot = "starlink" | "indoor1" | "indoor2" | "outdoor" | "router";
+type AutoEquipmentValue = { componentId: string; fieldId: string; value: string; generated: boolean };
+type ExtractionSummary = { filled: number; missing: number; warnings: string[]; diagnostics: string[]; source: "local" | "gemini" };
+const equipmentSlotValues: Record<ExtractionEquipmentSlot, keyof SiteReportValues> = { starlink: "starlinkKitNumber", indoor1: "ap1IndoorSerial", indoor2: "ap2IndoorSerial", outdoor: "ap3OutdoorSerial", router: "ruijieRouterSerial" };
+function extractionTypeMatch(slot: ExtractionEquipmentSlot, name: string) {
+  const value = name.toLowerCase();
+  if (slot === "starlink") return value.includes("starlink");
+  if (slot === "router") return value.includes("ruijie") && value.includes("router");
+  const accessPoint = /\bap\b|access\s*point/.test(value);
+  return accessPoint && value.includes(slot === "outdoor" ? "outdoor" : "indoor");
+}
 async function createWorkbook() { const { default: ExcelJS } = await import("exceljs"); return new ExcelJS.Workbook(); }
 function downloadBlob(blob: Blob, filename: string) {
   const href = URL.createObjectURL(blob);
@@ -901,6 +913,14 @@ function InstallationForm({
   const [schoolLookupOpen, setSchoolLookupOpen] = useState(false);
   const [schoolLookupIndex, setSchoolLookupIndex] = useState(0);
   const [schoolLookupNotice, setSchoolLookupNotice] = useState("");
+  const [pasteReport, setPasteReport] = useState("");
+  const [pastePanelOpen, setPastePanelOpen] = useState(false);
+  const [extractingReport, setExtractingReport] = useState<"local" | "gemini" | "">("");
+  const [extractionError, setExtractionError] = useState("");
+  const [extractionSummary, setExtractionSummary] = useState<ExtractionSummary>();
+  const autoScalarValues = useRef<Record<string, string>>({});
+  const autoEquipmentValues = useRef<Partial<Record<ExtractionEquipmentSlot, AutoEquipmentValue>>>({});
+  const autoContactValue = useRef<{ id: string; name: string; role: string; phone: string; generated: boolean } | undefined>(undefined);
   const [showExitModal, setShowExitModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [triedSubmit, setTriedSubmit] = useState(false);
@@ -948,6 +968,146 @@ function InstallationForm({
     patch(next);
     setSchoolLookupOpen(false);
     setSchoolMatches([]);
+  }
+
+  async function applyReportExtraction(extraction: SiteReportExtraction, source: "local" | "gemini") {
+    const values = extraction.values;
+    const warnings: string[] = [];
+    let filled = 0;
+    let directory: SchoolDirectoryEntry | null = null;
+    try { directory = await findSchoolDirectoryEntry({ schoolId: values.schoolId, schoolName: values.siteName }); }
+    catch { warnings.push("The school directory could not be checked. Parsed school values were still applied."); }
+
+    let resolvedLocation: Partial<Installation> | undefined;
+    const { resolveAddressLocation, resolveLocation } = await import("@/lib/locations");
+    if (directory) {
+      if (directory.regionCode && directory.provinceCode && directory.municipalityCode) resolvedLocation = directory;
+      else {
+        const resolution = resolveLocation({ islandGroup: directory.islandGroup, region: directory.region, province: directory.province, municipality: directory.municipality, barangay: directory.barangay });
+        resolvedLocation = resolution.location;
+        if (!resolvedLocation) warnings.push(`The directory school was found, but its location was unresolved. ${resolution.issue ?? ""}`.trim());
+      }
+    } else if (values.address) {
+      const resolution = resolveAddressLocation(values.address);
+      resolvedLocation = resolution.location;
+      if (!resolvedLocation) warnings.push(resolution.issue ?? "The report address could not be matched to PSGC data.");
+    } else if (values.schoolId || values.siteName) warnings.push("No unique school-directory match was found.");
+
+    const contractor = refs.contractors.find((item) => item.active && item.name.localeCompare(values.contractor, undefined, { sensitivity: "accent" }) === 0);
+    if (values.contractor && !contractor) {
+      setNewContractorName(values.contractor);
+      setAddingContractor(true);
+      setContractorError("");
+      warnings.push(`Contractor “${values.contractor}” is not in Settings. Review the prefilled Add contractor form.`);
+    }
+    const hasSatelliteEquipment = Boolean(values.starlinkKitNumber || values.ap1IndoorSerial || values.ap2IndoorSerial || values.ap3OutdoorSerial);
+    const solution = hasSatelliteEquipment ? refs.unitTypes.find((item) => item.active && /starlink|satellite/i.test(item.name)) : undefined;
+    if (hasSatelliteEquipment && !solution) warnings.push("No active Starlink or Satellite solution was found; the current Solution was preserved.");
+
+    setRecord((current) => {
+      const next: Installation = { ...current, components: current.components.map((component) => ({ ...component, values: { ...(component.values ?? {}) } })), beneficiaryContacts: beneficiaryContactList(current).map((contact) => ({ ...contact })) };
+      const applyScalar = (field: keyof Installation, incoming: unknown) => {
+        const value = typeof incoming === "string" ? incoming.trim() : incoming;
+        if (!value) return;
+        const currentValue = current[field];
+        const originalValue = original[field];
+        const previousAuto = autoScalarValues.current[String(field)];
+        if (currentValue !== "" && currentValue !== undefined && currentValue !== originalValue && String(currentValue) !== previousAuto) return;
+        if (currentValue !== value) filled += 1;
+        (next as unknown as Record<string, unknown>)[field] = value;
+        autoScalarValues.current[String(field)] = String(value);
+      };
+
+      applyScalar("id", directory?.schoolId || values.schoolId);
+      applyScalar("siteName", directory?.schoolName || values.siteName);
+      applyScalar("installerTeamLead", values.installerTeamLead);
+      applyScalar("installDate", values.installDate);
+      applyScalar("activationDate", values.activationDate || values.installDate);
+      applyScalar("longitude", values.longitude);
+      applyScalar("latitude", values.latitude);
+      applyScalar("remarks", values.remarks);
+      if (contractor) applyScalar("contractor", contractor.name);
+      if (solution) applyScalar("unitType", solution.name);
+      if (resolvedLocation) for (const field of ["islandGroup", "region", "regionCode", "province", "provinceCode", "municipality", "municipalityCode", "barangay", "barangayCode"] as const) applyScalar(field, resolvedLocation[field]);
+
+      const usedComponents = new Set<string>();
+      for (const slot of Object.keys(equipmentSlotValues) as ExtractionEquipmentSlot[]) {
+        const incoming = values[equipmentSlotValues[slot]];
+        const previous = autoEquipmentValues.current[slot];
+        if (!incoming) {
+          if (previous) {
+            const component = next.components.find((item) => item.id === previous.componentId);
+            const unchanged = component?.values[previous.fieldId] === previous.value;
+            if (previous.generated && unchanged) next.components = next.components.filter((item) => item.id !== previous.componentId);
+            else if (!previous.generated && unchanged && component) component.values[previous.fieldId] = "";
+            delete autoEquipmentValues.current[slot];
+          }
+          continue;
+        }
+        const type = orderedByDisplay(refs.componentTypes).find((item) => item.active && extractionTypeMatch(slot, item.name));
+        if (!type) { warnings.push(`No active ${slot === "router" ? "Ruijie Router" : slot === "starlink" ? "Starlink" : slot === "outdoor" ? "Outdoor AP" : "Indoor AP"} component type is configured.`); continue; }
+        const field = orderedByDisplay(type.fields).find((attachment) => attachment.active && {
+          starlink: /kit/i,
+          indoor1: /serial/i,
+          indoor2: /serial/i,
+          outdoor: /serial/i,
+          router: /serial/i,
+        }[slot].test(libraryField(refs, attachment)?.label ?? ""));
+        if (!field) { warnings.push(`${type.name} has no active ${slot === "starlink" ? "Kit" : "Serial"} field.`); continue; }
+
+        let component = previous ? next.components.find((item) => item.id === previous.componentId && item.values[previous.fieldId] === previous.value) : undefined;
+        let generated = previous?.generated ?? false;
+        if (!component) {
+          component = next.components.find((item) => !item.removedAt && item.type === type.name && !usedComponents.has(item.id) && !(item.values?.[field.id] ?? "").trim());
+          generated = false;
+        }
+        if (!component) {
+          component = componentDraft(type.name, next.components.length);
+          next.components.push(component);
+          generated = true;
+        }
+        component.type = type.name;
+        component.values[field.id] = incoming;
+        usedComponents.add(component.id);
+        autoEquipmentValues.current[slot] = { componentId: component.id, fieldId: field.id, value: incoming, generated };
+        filled += 1;
+      }
+
+      const contactIncoming = { name: values.beneficiaryName, role: values.beneficiaryRole, phone: values.beneficiaryPhone };
+      const hasContact = Object.values(contactIncoming).some(Boolean);
+      const previousContact = autoContactValue.current;
+      if (!hasContact && previousContact) {
+        const contact = next.beneficiaryContacts.find((item) => item.id === previousContact.id);
+        const unchanged = contact && contact.name === previousContact.name && contact.role === previousContact.role && contact.phone === previousContact.phone;
+        if (previousContact.generated && unchanged) next.beneficiaryContacts = next.beneficiaryContacts.filter((item) => item.id !== previousContact.id);
+        else if (!previousContact.generated && unchanged && contact) Object.assign(contact, { name: "", role: "", phone: "" });
+        autoContactValue.current = undefined;
+      } else if (hasContact) {
+        let contact = previousContact ? next.beneficiaryContacts.find((item) => item.id === previousContact.id && item.name === previousContact.name && item.role === previousContact.role && item.phone === previousContact.phone) : undefined;
+        let generated = previousContact?.generated ?? false;
+        if (!contact) { contact = next.beneficiaryContacts.find((item) => !item.name && !item.role && !item.phone); generated = false; }
+        if (!contact) { contact = contactDraft(); next.beneficiaryContacts.push(contact); generated = true; }
+        Object.assign(contact, contactIncoming);
+        autoContactValue.current = { id: contact.id, ...contactIncoming, generated };
+        filled += Object.values(contactIncoming).filter(Boolean).length;
+      }
+      return next;
+    });
+    window.setTimeout(() => setExtractionSummary({ filled, missing: extraction.missing.length, warnings: [...new Set(warnings)], diagnostics: extraction.diagnostics, source }), 0);
+    setPastePanelOpen(false);
+    setSchoolLookupNotice(directory ? "Matched the school directory and applied its canonical school and PSGC location data." : "Report values were extracted. Review the highlighted summary before saving.");
+  }
+
+  async function extractReport(source: "local" | "gemini") {
+    const report = pasteReport.trim();
+    if (!report) { setExtractionError("Paste an activation report first."); return; }
+    if (report.length > 50_000) { setExtractionError("The report must be 50,000 characters or fewer."); return; }
+    setExtractingReport(source); setExtractionError("");
+    try {
+      const extraction = source === "gemini" ? await extractSiteReportWithGemini(report) as SiteReportExtraction : parseSiteActivationReport(report);
+      await applyReportExtraction(extraction, source);
+    } catch (error) { setExtractionError(errorMessage(error, source === "gemini" ? "Gemini could not check this report. Local extraction is still available." : "Unable to extract this report.")); }
+    finally { setExtractingReport(""); }
   }
 
   function schoolLookupKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
@@ -1086,6 +1246,13 @@ function InstallationForm({
     {triedSubmit && hasValidationError && <div className="notice validation-notice inline" role="alert" tabIndex={-1} ref={validationSummaryRef}><strong>Check the highlighted site details before saving.</strong> Review the messages below and correct each required value.</div>}
     {tab === "overview" && <fieldset id="site-panel-overview" aria-labelledby="site-tab-overview" className="panel site-fields editing" role="tabpanel" disabled={readOnly}>
       {!readOnly && <section className="section site-required-summary" aria-label="Core site workflow"><div><strong>Core workflow</strong><div className="small muted">{requiredCompleteCount} of {requiredProgress.length} sections ready. Optional details stay collapsed until needed.</div></div><div className="site-required-steps">{requiredProgress.map((item) => <span className={`site-required-step ${item.complete ? "complete" : ""}`} key={item.label}>{item.complete ? <CheckCircle2 size={13} /> : <CircleDot size={13} />}{item.label}</span>)}</div></section>}
+      {!initial && !readOnly && <section className="section paste-report-panel" aria-labelledby="paste-report-title">
+        <button type="button" className="paste-report-disclosure" aria-expanded={pastePanelOpen} onClick={() => setPastePanelOpen((open) => !open)}>
+          <span className="paste-report-icon"><ClipboardPaste size={18} /></span><span><strong id="paste-report-title">Paste activation report</strong><small>{extractionSummary ? `${extractionSummary.filled} values filled · ${extractionSummary.missing} missing · ${extractionSummary.warnings.length} warnings` : "Extract school, location, equipment, and contact details"}</small></span><ChevronDown size={17} className={pastePanelOpen ? "open" : ""} />
+        </button>
+        {pastePanelOpen && <div className="paste-report-body"><label>Activation report<textarea className="textarea paste-report-textarea" rows={10} maxLength={50000} value={pasteReport} onChange={(event) => setPasteReport(event.target.value)} placeholder="Paste the contractor activation message here" /></label><div className="paste-report-actions"><span className="small muted">{pasteReport.length.toLocaleString()} / 50,000 characters</span><div className="toolbar"><button type="button" className="button" disabled={Boolean(extractingReport) || !pasteReport.trim()} onClick={() => void extractReport("gemini")}>{extractingReport === "gemini" ? "Checking..." : "Check with Gemini"}</button><button type="button" className="button primary" disabled={Boolean(extractingReport) || !pasteReport.trim()} onClick={() => void extractReport("local")}><ClipboardPaste size={15} />{extractingReport === "local" ? "Extracting..." : "Extract and fill"}</button></div></div>{extractionError && <div className="notice validation-notice inline" role="alert">{extractionError}</div>}</div>}
+        {!pastePanelOpen && extractionSummary && <div className="paste-report-summary" role="status"><div><strong>{extractionSummary.source === "gemini" ? "Gemini check applied" : "Report extracted"}</strong><span className="small muted">{extractionSummary.filled} values filled, {extractionSummary.missing} expected values missing.</span></div><button type="button" className="button" onClick={() => setPastePanelOpen(true)}>Reopen</button>{extractionSummary.warnings.length > 0 && <ul>{extractionSummary.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}{extractionSummary.diagnostics.length > 0 && <div className="small muted paste-report-diagnostics">{extractionSummary.diagnostics.join(" ")}</div>}</div>}
+      </section>}
       {initial && <section className="section ownership-grid" aria-label="Saved record metadata"><div><span className="small muted">Created by</span><strong>{record.createdBy}</strong></div><div><span className="small muted">Created</span><strong>{niceDateTime(record.createdAt)}</strong></div><div><span className="small muted">Updated by</span><strong>{record.updatedBy}</strong></div><div><span className="small muted">Last saved</span><strong>{niceDateTime(record.updatedAt)}</strong></div></section>}
       <section id="site-details-section" className="section site-details-polish site-details-guided"><div className="section-title"><div><h2>Site details</h2><span className="small muted">Identity, ownership, and current installation state</span></div></div><div className="grid-3">
         <label className="school-lookup">Site name<input required className="field" role="combobox" aria-autocomplete="list" aria-expanded={schoolLookupOpen && schoolMatches.length > 0} aria-controls="school-directory-results" value={record.siteName} onFocus={() => setSchoolLookupOpen(true)} onBlur={() => window.setTimeout(() => setSchoolLookupOpen(false), 120)} onKeyDown={schoolLookupKeyDown} onChange={(e) => { patch({ siteName: e.target.value }); setSchoolLookupOpen(true); setSchoolLookupNotice(""); }} placeholder="Search or enter a school name" />{schoolLookupOpen && record.siteName.trim().length >= 2 && schoolMatches.length > 0 && <div className="school-lookup-results" id="school-directory-results" role="listbox">{schoolMatches.map((entry, index) => <button type="button" className={`school-lookup-option ${index === schoolLookupIndex ? "active" : ""}`} role="option" aria-selected={index === schoolLookupIndex} key={entry.id} onMouseDown={(event) => event.preventDefault()} onClick={() => selectDirectorySchool(entry)}><span className="school-lookup-name">{entry.schoolName}</span><span className="school-lookup-province">{entry.province || "Province unavailable"}</span></button>)}</div>}</label>

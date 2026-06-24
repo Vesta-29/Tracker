@@ -7,12 +7,14 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
+    "test": "vitest run",
     "seed:psgc": "node --env-file-if-exists=.env.local scripts/seed-psgc.mjs",
     "seed:references": "node --env-file-if-exists=.env.local scripts/seed-references.mjs",
     "bootstrap:admin": "node --env-file-if-exists=.env.local scripts/bootstrap-admin.mjs",
     "check:psgc": "node scripts/check-psgc.mjs"
   },
   "dependencies": {
+    "@google/genai": "^2.10.0",
     "@jobuntux/psgc": "0.2.1",
     "@supabase/ssr": "^0.7.0",
     "@supabase/supabase-js": "^2.57.4",
@@ -31,7 +33,8 @@
     "eslint": "^9.36.0",
     "eslint-config-next": "^16.2.6",
     "tailwindcss": "^4.1.14",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.9"
   },
   "overrides": {
     "uuid": "^11.1.1"

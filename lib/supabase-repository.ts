@@ -89,6 +89,33 @@ export async function searchSchoolDirectory(query: string) {
   return data.map(mapSchoolDirectoryEntry);
 }
 
+export async function findSchoolDirectoryEntry(input: { schoolId?: string; schoolName?: string }) {
+  const columns = "id,school_id,school_name,island_group,region_name,region_code,province_name,province_code,municipality_name,municipality_code,barangay_name,barangay_code,source_row,validation_warning";
+  const schoolId = input.schoolId?.trim();
+  if (schoolId) {
+    const { data, error } = await supabase().from("school_directory_entries").select(columns).ilike("school_id", schoolId).limit(2);
+    if (error) throw error;
+    if (data.length === 1) return mapSchoolDirectoryEntry(data[0]);
+  }
+  const schoolName = input.schoolName?.trim();
+  if (!schoolName) return null;
+  const { data, error } = await supabase().from("school_directory_entries").select(columns).ilike("school_name", schoolName).limit(2);
+  if (error) throw error;
+  return data.length === 1 ? mapSchoolDirectoryEntry(data[0]) : null;
+}
+
+export async function extractSiteReportWithGemini(report: string) {
+  const session = await currentSession();
+  const response = await fetch("/api/extract-site-report", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
+    body: JSON.stringify({ report }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error || "Gemini could not extract this report.");
+  return result.extraction;
+}
+
 export async function loadSchoolDirectoryStatus(): Promise<SchoolDirectoryStatus | null> {
   const { data, error } = await supabase().from("school_directory_uploads").select("filename,total_rows,complete_rows,partial_rows,skipped_rows,created_at,uploader:profiles!school_directory_uploads_uploaded_by_fkey(full_name)").order("created_at", { ascending: false }).limit(1).maybeSingle();
   if (error) throw error;

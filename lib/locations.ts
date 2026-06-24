@@ -110,6 +110,29 @@ export function resolveLocation(input: LocationInput): LocationResolution {
   return candidates.length === 1 ? { location: candidates[0] } : { issue: "Ambiguous name-only location path; add PSGC codes" };
 }
 
+export function resolveAddressLocation(address: string): LocationResolution {
+  const parts = address.split(",").map((part) => part.trim()).filter(Boolean);
+  if (parts.length < 2) return { issue: "Address needs at least a municipality and province" };
+  const provinceName = parts.at(-1);
+  const municipalityName = parts.at(-2);
+  const barangayName = parts.length >= 3 ? parts.at(-3) : undefined;
+  const matchingProvinces = provinces.filter((province) => matchesName(province.provName, provinceName));
+  const matchingMunicipalities = matchingProvinces.flatMap((province) => {
+    const region = regions.find((candidate) => candidate.regCode === province.regCode);
+    if (!region) return [];
+    return listMuncities(province.psgcCode)
+      .filter((municipality) => matchesName(municipality.munCityName, municipalityName))
+      .map((municipality) => ({ region, province, municipality }));
+  });
+  const candidates = matchingMunicipalities.flatMap(({ region, province, municipality }) => {
+    if (!barangayName) return [selection(region, province, municipality)];
+    const matches = listBarangays(municipality.psgcCode).filter((barangay) => matchesName(barangay.brgyName, barangayName));
+    return matches.length ? matches.map((barangay) => selection(region, province, municipality, barangay)) : [selection(region, province, municipality)];
+  });
+  if (!candidates.length) return { issue: `Address could not be matched to PSGC data: ${address}` };
+  return candidates.length === 1 ? { location: candidates[0] } : { issue: `Address matches more than one PSGC location: ${address}` };
+}
+
 export function requireLocation(input: LocationInput) {
   const resolved = resolveLocation(input);
   if (!resolved.location) throw new Error(resolved.issue);
