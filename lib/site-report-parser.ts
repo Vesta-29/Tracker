@@ -41,7 +41,7 @@ const aliases: Partial<Record<SiteReportField, readonly string[]>> = {
   ap1IndoorSerial: ["AP 1 Indoor", "AP1 Indoor", "AP 1 Indoor Serial Number"],
   ap2IndoorSerial: ["AP 2 Indoor", "AP2 Indoor", "AP 2 Indoor Serial Number"],
   ap3OutdoorSerial: ["AP 3 Outdoor", "AP3 Outdoor", "AP 3 Outdoor Serial Number"],
-  ruijieRouterSerial: ["Ruijie Router S/N", "Ruijie Router SN", "Ruijie Router Serial Number", "Router S/N"],
+  ruijieRouterSerial: ["Ruijie Router S/N", "Ruijie Router SN", "Ruijie Router Serial Number", "Router S/N", "Router SN", "Router Serial Number", "Router"],
   contractor: ["Company Name", "MSP"],
   installerTeamLead: ["Team Lead Name", "MSP Installer/Team Lead", "Installer Team Lead", "Team Lead"],
   installDate: ["Date Installed", "Installation Date", "Date"],
@@ -70,8 +70,17 @@ const splitLines = (text: string) => text.split(/\r?\n/).map((raw, index) => {
 
 function labeledValue(text: string, field: SiteReportField) {
   const candidates = aliases[field] ?? [];
-  const match = splitLines(text).find((line) => line.label && line.value && labelMatches(line.label, candidates));
-  return match ? { value: match.value, index: match.index } : undefined;
+  const lines = splitLines(text);
+  const match = lines.find((line) => line.label && labelMatches(line.label, candidates));
+  if (!match) return undefined;
+  if (match.value) return { value: match.value, index: match.index };
+  for (const line of lines.slice(match.index + 1)) {
+    const raw = line.raw.trim();
+    if (!raw) continue;
+    if (line.label && Object.values(aliases).some((group) => labelMatches(line.label, group ?? []))) break;
+    return { value: raw, index: match.index };
+  }
+  return undefined;
 }
 
 const MONTHS: Record<string, number> = {
@@ -103,10 +112,17 @@ export function normalizeSiteReportDate(value: unknown) {
 }
 
 function coordinatePair(text: string) {
-  return {
-    latitude: text.match(/\blat(?:itude)?\b\s*[:=]?\s*(-?\d{1,3}(?:\.\d+)?)/i)?.[1] ?? "",
-    longitude: text.match(/\b(?:long(?:itude)?|lng)\b\s*[:=]?\s*(-?\d{1,3}(?:\.\d+)?)/i)?.[1] ?? "",
-  };
+  const latitude = text.match(/\blat(?:itude)?\b\s*[:=]?\s*(-?\d{1,3}(?:\.\d+)?)/i)?.[1] ?? "";
+  const longitude = text.match(/\b(?:long(?:itude)?|lng)\b\s*[:=]?\s*(-?\d{1,3}(?:\.\d+)?)/i)?.[1] ?? "";
+  if (latitude || longitude) return { latitude, longitude };
+  const labeledPair = text.match(/\b(?:actual\s+)?coordinates?\b(?:\s*\([^)]*\))?\s*[:=]?\s*\(?\s*(-?\d{1,3}\.\d+)\s*[,;/ ]+\s*(-?\d{1,3}\.\d+)\s*\)?/i);
+  const plainPair = text.match(/(?:^|\n|\s|\()(-?\d{1,3}\.\d+)\s*[,;/ ]+\s*(-?\d{1,3}\.\d+)(?:\s|$|\))/);
+  const pair = labeledPair ?? plainPair;
+  if (!pair) return { latitude: "", longitude: "" };
+  const first = Number(pair[1]);
+  const second = Number(pair[2]);
+  const looksLatLong = Math.abs(first) <= 90 && Math.abs(second) <= 180;
+  return looksLatLong ? { latitude: pair[1], longitude: pair[2] } : { latitude: "", longitude: "" };
 }
 
 function coordinateSections(text: string) {
@@ -128,7 +144,7 @@ function coordinateSections(text: string) {
 
 function beneficiaryBlock(text: string) {
   const lines = splitLines(text);
-  const nameMatch = lines.find((line) => line.label && line.value && labelMatches(line.label, aliases.beneficiaryName ?? []));
+  const nameMatch = labeledValue(text, "beneficiaryName");
   const explicitRole = labeledValue(text, "beneficiaryRole")?.value ?? "";
   const explicitPhone = labeledValue(text, "beneficiaryPhone")?.value ?? "";
   if (!nameMatch) return { name: "", role: explicitRole, phone: explicitPhone };
@@ -185,7 +201,7 @@ export function parseSiteActivationReport(text: string): SiteReportExtraction {
   if (!values.activationDate && values.installDate) values.activationDate = values.installDate;
   const missing = SITE_REPORT_FIELDS.filter((field) => !values[field] && !field.startsWith("commbox") && field !== "logInTime");
   const diagnostics: string[] = [];
-  if (coordinates.usedFlagPole) diagnostics.push("Flag Pole coordinates selected for the site.");
+  if (coordinates.usedFlagPole || /flag\s*pole/i.test(text)) diagnostics.push("Flag Pole coordinates selected for the site.");
   if (values.commboxLatitude || values.commboxLongitude) diagnostics.push(`Commbox coordinates: ${values.commboxLatitude || "?"}, ${values.commboxLongitude || "?"}.`);
   if (values.logInTime) diagnostics.push(`Log-In Time: ${values.logInTime}.`);
   return { values, found: SITE_REPORT_FIELDS.filter((field) => Boolean(values[field])).length, missing, diagnostics };

@@ -72,4 +72,64 @@ describe("parseSiteActivationReport", () => {
     expect(result.values.remarks).toBe("First line Second line");
     expect(result.values.starlinkKitNumber).toBe("");
   });
+
+  it("reads labeled values from the following line", () => {
+    const result = parseSiteActivationReport(`Site Code:
+500604
+School Name:
+Agno Elementary School
+Date:
+June 25, 2026
+Starlink KIT Number:
+KIT4P00054292MG7
+AP 1 Indoor:
+G1UC0BC013748
+AP 2 Indoor:
+G1UC2LK00941A
+AP 3 Outdoor:
+G1UC09S011774
+Router:
+H1V10XN001454
+Beneficiary:
+Febe D. Jalandoni
+Teacher II
+09300498263`);
+    expect(result.values).toMatchObject({
+      schoolId: "500604",
+      siteName: "Agno Elementary School",
+      installDate: "2026-06-25",
+      activationDate: "2026-06-25",
+      starlinkKitNumber: "KIT4P00054292MG7",
+      ap1IndoorSerial: "G1UC0BC013748",
+      ap2IndoorSerial: "G1UC2LK00941A",
+      ap3OutdoorSerial: "G1UC09S011774",
+      ruijieRouterSerial: "H1V10XN001454",
+      beneficiaryName: "Febe D. Jalandoni",
+      beneficiaryRole: "Teacher II",
+      beneficiaryPhone: "09300498263",
+    });
+  });
+
+  it("accepts coordinates on one line or separated by commas", () => {
+    expect(parseSiteActivationReport("Coordinates: 11.368908, 122.75106").values).toMatchObject({
+      latitude: "11.368908",
+      longitude: "122.75106",
+    });
+    expect(parseSiteActivationReport("Actual Coordinates:\n11.368908,122.75106").values).toMatchObject({
+      latitude: "11.368908",
+      longitude: "122.75106",
+    });
+    expect(parseSiteActivationReport("Flag Pole\n11.368908 122.75106\n\nCommbox\n11.369157, 122.750482").values).toMatchObject({
+      latitude: "11.368908",
+      longitude: "122.75106",
+      commboxLatitude: "11.369157",
+      commboxLongitude: "122.750482",
+    });
+    const parenthesized = parseSiteActivationReport("Actual Coordinates (Taken at School Flag Pole): (13.291712,123.239024)");
+    expect(parenthesized.values).toMatchObject({
+      latitude: "13.291712",
+      longitude: "123.239024",
+    });
+    expect(parenthesized.diagnostics).toContain("Flag Pole coordinates selected for the site.");
+  });
 });

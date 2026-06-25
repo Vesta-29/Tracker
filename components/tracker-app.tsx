@@ -71,7 +71,7 @@ const equipmentSlotValues: Record<ExtractionEquipmentSlot, keyof SiteReportValue
 function extractionTypeMatch(slot: ExtractionEquipmentSlot, name: string) {
   const value = name.toLowerCase();
   if (slot === "starlink") return value.includes("starlink");
-  if (slot === "router") return value.includes("ruijie") && value.includes("router");
+  if (slot === "router") return /\brouter\b/.test(value);
   const accessPoint = /\bap\b|access\s*point/.test(value);
   return accessPoint && value.includes(slot === "outdoor" ? "outdoor" : "indoor");
 }
@@ -1898,6 +1898,11 @@ function downloadCsv(records: Installation[], refs: ReferenceData) {
 
 function exportMatchKey(value: string) { return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); }
 function isAccessPoint(type: string) { const key = exportMatchKey(type); return /(^| )ap( |$)/.test(key) || key.includes("access point"); }
+function isRouterComponent(component: Component) { return /\brouter\b/.test(exportMatchKey(component.type)); }
+function findRouterComponent(components: Component[]) {
+  const routers = components.filter((component) => !component.removedAt && isRouterComponent(component));
+  return routers.find((component) => exportMatchKey(component.type).includes("ruijie")) ?? routers[0];
+}
 function equipmentFieldValue(component: Component | undefined, refs: ReferenceData, fieldName: "serial" | "kit") {
   if (!component) return "";
   const field = visibleComponentFields(refs, component).find((attachment) => { const reusable = libraryField(refs, attachment); return reusable && exportMatchKey(reusable.label).includes(fieldName); });
@@ -1928,11 +1933,7 @@ function installationExcelClipboardRow(record: Installation, refs: ReferenceData
 
 function installationRouterContactClipboardRow(record: Installation, refs: ReferenceData) {
   const cleanCell = (value: unknown) => String(value ?? "").replace(/[\t\r\n]+/g, " ").trim();
-  const ruijieRouter = record.components.find((component) => {
-    if (component.removedAt) return false;
-    const type = exportMatchKey(component.type);
-    return type.includes("ruijie") && type.includes("router");
-  });
+  const ruijieRouter = findRouterComponent(record.components);
   const contact = beneficiaryContactList(record).find(contactHasValue);
   return [
     record.id,
@@ -1950,7 +1951,7 @@ function xlsxInstallationRows(records: Installation[], refs: ReferenceData) {
     const starlink = activeComponents.find((component) => exportMatchKey(component.type).includes("starlink"));
     const indoorAccessPoints = activeComponents.filter((component) => isAccessPoint(component.type) && exportMatchKey(component.type).includes("indoor"));
     const outdoorAccessPoint = activeComponents.find((component) => isAccessPoint(component.type) && exportMatchKey(component.type).includes("outdoor"));
-    const ruijieRouter = activeComponents.find((component) => { const type = exportMatchKey(component.type); return type.includes("ruijie") && type.includes("router"); });
+    const ruijieRouter = findRouterComponent(activeComponents);
     const contacts = beneficiaryContactList(record).filter(contactHasValue);
     return [index + 1, record.id, record.siteName, record.islandGroup, record.region, record.province, record.municipality, record.barangay, record.longitude, record.latitude, equipmentFieldValue(starlink, refs, "kit"), record.activationDate ?? "", equipmentFieldValue(indoorAccessPoints[0], refs, "serial"), equipmentFieldValue(indoorAccessPoints[1], refs, "serial"), equipmentFieldValue(outdoorAccessPoint, refs, "serial"), equipmentFieldValue(ruijieRouter, refs, "serial"), record.contractor, record.installerTeamLead, record.installDate, contacts.map((contact) => contact.name.trim()).join("\n"), "", contacts.map((contact) => contact.phone.trim()).join("\n"), record.remarks];
   })];
