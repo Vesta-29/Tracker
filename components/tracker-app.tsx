@@ -16,11 +16,11 @@ import type { AuditEvent, BeneficiaryContact, Component, ComponentFieldAttachmen
 import { parseSiteActivationReport, type SiteReportExtraction, type SiteReportValues } from "@/lib/site-report-parser";
 
 type Page = "dashboard" | "installations" | "new" | "serviceVisits" | "import" | "settings";
-type Filter = { search: string; status: string; contractor: string; islandGroup: string; regionCode: string; provinceCode: string; municipalityCode: string; barangayCode: string; from: string; to: string; attention: "" | "missingName" | "legacyKit" };
+type Filter = { search: string; status: string; contractor: string; updatedBy: string; islandGroup: string; regionCode: string; provinceCode: string; municipalityCode: string; barangayCode: string; from: string; to: string; attention: "" | "missingName" | "legacyKit" };
 type ServiceVisitFilter = { search: string; status: string; type: string; contractor: string; from: string; to: string };
 type ReferenceSaveState = "idle" | "saving" | "saved" | "failed";
 type ImportRow = { row: number; kind: "Site" | "Equipment"; subject: string; details: string; reference: string; valid: boolean; issue: string };
-const emptyFilter: Filter = { search: "", status: "", contractor: "", islandGroup: "", regionCode: "", provinceCode: "", municipalityCode: "", barangayCode: "", from: "", to: "", attention: "" };
+const emptyFilter: Filter = { search: "", status: "", contractor: "", updatedBy: "", islandGroup: "", regionCode: "", provinceCode: "", municipalityCode: "", barangayCode: "", from: "", to: "", attention: "" };
 const emptyReferences: ReferenceData = { schoolDirectory: [], siteStatuses: [], contractors: [], unitTypes: [], componentTypes: [], equipmentFields: [], customFields: [], serviceVisitTypes: [] };
 const addContractorOption = "__add_contractor__";
 type RouteWorkspace = { profile: Profile; refs: ReferenceData; records: Installation[]; loadedAt: number };
@@ -125,6 +125,7 @@ function siteFilterFromSearchParams(params: URLSearchParams): Filter {
     search: params.get("search") ?? "",
     status: params.get("status") ?? "",
     contractor: params.get("contractor") ?? "",
+    updatedBy: params.get("updatedBy") ?? "",
     islandGroup: params.get("islandGroup") ?? "",
     regionCode: params.get("regionCode") ?? "",
     provinceCode: params.get("provinceCode") ?? "",
@@ -141,9 +142,10 @@ function siteFilterQuery(filters: Filter) {
   return params.toString();
 }
 function sanitizeSiteFilter(filters: Filter, records: Installation[], refs: ReferenceData): Filter {
-  const next = { ...filters };
+  const next = { ...emptyFilter, ...filters };
   if (next.status && !siteStatusOptions(refs).some((option) => option.value === next.status)) next.status = "";
   if (next.contractor && !refs.contractors.some((item) => item.name === next.contractor)) next.contractor = "";
+  if (next.updatedBy && !records.some((record) => record.updatedBy === next.updatedBy)) next.updatedBy = "";
   if (next.islandGroup && !records.some((record) => record.islandGroup === next.islandGroup)) next.islandGroup = "";
   if (next.regionCode && !records.some((record) => (!next.islandGroup || record.islandGroup === next.islandGroup) && record.regionCode === next.regionCode)) next.regionCode = "";
   if (!next.regionCode) { next.provinceCode = ""; next.municipalityCode = ""; next.barangayCode = ""; return next; }
@@ -188,7 +190,7 @@ function componentType(refs: ReferenceData, type: string) { return refs.componen
 function libraryField(refs: ReferenceData, attachment: ComponentFieldAttachment) { return (refs.equipmentFields ?? []).find((field) => field.id === attachment.libraryFieldId); }
 function locationLabel(record: Pick<Installation, "barangay" | "municipality">) { return [record.barangay, record.municipality].filter(Boolean).join(", ") || "Location pending"; }
 function contactDraft(): BeneficiaryContact { return { id: crypto.randomUUID(), name: "", role: "", phone: "" }; }
-function contactHasValue(contact: BeneficiaryContact) { return Boolean(contact.name.trim() || contact.role.trim() || contact.phone.trim()); }
+function contactHasValue(contact: BeneficiaryContact) { return Boolean(contact.name.trim() || contact.phone.trim()); }
 function beneficiaryContactList(record: Pick<Installation, "beneficiaryContacts" | "beneficiaryName" | "beneficiaryRole" | "beneficiaryPhone">) {
   return record.beneficiaryContacts?.length ? record.beneficiaryContacts : [{ id: crypto.randomUUID(), name: record.beneficiaryName || "", role: record.beneficiaryRole || "", phone: record.beneficiaryPhone || "" }];
 }
@@ -206,12 +208,12 @@ function additionalBeneficiaryContacts(record: Pick<Installation, "beneficiaryCo
 }
 function additionalBeneficiaryContactsValue(record: Pick<Installation, "beneficiaryContacts" | "beneficiaryName" | "beneficiaryRole" | "beneficiaryPhone">) {
   const contacts = additionalBeneficiaryContacts(record);
-  return contacts.length ? JSON.stringify(contacts.map(({ name, role, phone }) => ({ name, role, phone }))) : "";
+  return contacts.length ? JSON.stringify(contacts.map(({ name, phone }) => ({ name, phone }))) : "";
 }
 function syncedBeneficiaryFields(record: Installation): Installation {
-  const contacts = beneficiaryContactList(record).map((contact) => ({ ...contact, name: contact.name.trim(), role: contact.role.trim(), phone: contact.phone.trim() })).filter(contactHasValue);
+  const contacts = beneficiaryContactList(record).map((contact) => ({ ...contact, name: contact.name.trim(), role: "", phone: contact.phone.trim() })).filter(contactHasValue);
   const first = contacts[0];
-  return { ...record, beneficiaryContacts: contacts, beneficiaryName: first?.name || "", beneficiaryRole: first?.role || "", beneficiaryPhone: first?.phone || "" };
+  return { ...record, beneficiaryContacts: contacts, beneficiaryName: first?.name || "", beneficiaryRole: "", beneficiaryPhone: first?.phone || "" };
 }
 function visibleComponentFields(refs: ReferenceData, component: Component) { return (componentType(refs, component.type)?.fields ?? []).filter((field) => field.active || Boolean((component.values ?? {})[field.id])).sort((a, b) => a.order - b.order); }
 function componentMacValues(refs: ReferenceData, component: Component) { return visibleComponentFields(refs, component).filter((field) => libraryField(refs, field)?.type === "mac").map((field) => normalizeMac((component.values ?? {})[field.id] ?? "")).filter(Boolean); }
@@ -380,6 +382,7 @@ export default function TrackerApp() {
     (!filters.search || `${r.id} ${r.siteName} ${r.legacyKitNumber ?? ""} ${r.barangay} ${r.municipality}`.toLowerCase().includes(filters.search.toLowerCase())) &&
     (!filters.status || r.status === filters.status) &&
     (!filters.contractor || r.contractor === filters.contractor) &&
+    (!filters.updatedBy || r.updatedBy === filters.updatedBy) &&
     (!filters.islandGroup || r.islandGroup === filters.islandGroup) &&
     (!filters.regionCode || r.regionCode === filters.regionCode) &&
     (!filters.provinceCode || r.provinceCode === filters.provinceCode) &&
@@ -592,12 +595,13 @@ function FilterBar({ records, refs, filters, setFilters, compact = false }: { re
   const maxDate = installDates.length ? installDates.reduce((a, b) => (a > b ? a : b)) : "";
   const uniqueLocations = <T extends { code: string }>(items: T[]) => Array.from(new Map(items.map((item) => [item.code, item])).values());
   const availableIslandGroups = Array.from(new Set(records.map((record) => record.islandGroup).filter(Boolean)));
+  const updatedByOptions = Array.from(new Set(records.map((record) => record.updatedBy).filter(Boolean))).sort((a, b) => a.localeCompare(b));
   const regions = uniqueLocations(records.filter((record) => !filters.islandGroup || record.islandGroup === filters.islandGroup).map((record) => ({ code: record.regionCode, name: record.region })));
   const provinces = uniqueLocations(records.filter((record) => (!filters.islandGroup || record.islandGroup === filters.islandGroup) && (!filters.regionCode || record.regionCode === filters.regionCode)).map((record) => ({ code: record.provinceCode, name: record.province })));
   const municipalities = uniqueLocations(records.filter((record) => (!filters.islandGroup || record.islandGroup === filters.islandGroup) && (!filters.regionCode || record.regionCode === filters.regionCode) && (!filters.provinceCode || record.provinceCode === filters.provinceCode)).map((record) => ({ code: record.municipalityCode, name: record.municipality })));
   const barangays = uniqueLocations(records.filter((record) => record.barangayCode && (!filters.islandGroup || record.islandGroup === filters.islandGroup) && (!filters.regionCode || record.regionCode === filters.regionCode) && (!filters.provinceCode || record.provinceCode === filters.provinceCode) && (!filters.municipalityCode || record.municipalityCode === filters.municipalityCode)).map((record) => ({ code: record.barangayCode, name: record.barangay })));
   const activeLocationCount = [filters.islandGroup, filters.regionCode, filters.provinceCode, filters.municipalityCode, filters.barangayCode].filter(Boolean).length;
-  const active = filters.search || filters.status || filters.contractor || activeLocationCount || filters.from || filters.to || filters.attention;
+  const active = filters.search || filters.status || filters.contractor || filters.updatedBy || activeLocationCount || filters.from || filters.to || filters.attention;
   function persistSavedViews(next: SavedSiteFilter[]) {
     setSavedViews(next);
     localStorage.setItem(savedSiteFiltersKey, JSON.stringify(next));
@@ -621,10 +625,10 @@ function FilterBar({ records, refs, filters, setFilters, compact = false }: { re
     <div className="toolbar filter-row">
       <div className="input-wrap"><Search className="input-icon" size={17} /><input className="field search" data-site-search="true" aria-label="Search sites" value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} placeholder="Search site, school ID, or location" /></div>
       <select className="select" aria-label="Filter sites by contractor" value={filters.contractor} onChange={(e) => setFilters({ ...filters, contractor: e.target.value })}><option value="">All contractors</option>{refs.contractors.map((c) => <option key={c.id}>{c.name}</option>)}</select>
+      <select className="select updated-by-filter" aria-label="Filter sites by updated by" value={filters.updatedBy} onChange={(e) => setFilters({ ...filters, updatedBy: e.target.value })}><option value="">Updated by</option>{updatedByOptions.map((name) => <option key={name}>{name}</option>)}</select>
       {savedViews.length > 0 && <select className="select saved-view-select" aria-label="Apply saved site filter" value="" onChange={(event) => { const view = savedViews.find((item) => item.id === event.target.value); if (view) setFilters(sanitizeSiteFilter(view.filters, records, refs)); }}><option value="">Saved views</option>{savedViews.map((view) => <option value={view.id} key={view.id}>{view.name}</option>)}</select>}
-      {active && <button type="button" className="button ghost" onClick={() => setSavingView((open) => !open)}>Save view</button>}
       {compact ? <button type="button" className={`button advanced-filter-trigger ${advanced || activeLocationCount ? "active" : ""}`} aria-expanded={advanced} onClick={() => setAdvanced((open) => !open)}>Advanced filters{activeLocationCount > 0 && <span>{activeLocationCount}</span>}<ChevronDown size={14} /></button> : locationFilters}
-      {active && <button className="button ghost" onClick={() => setFilters(emptyFilter)}><X size={16} />Clear</button>}
+      {active && <div className="filter-actions"><button type="button" className="button ghost filter-action-button" onClick={() => setSavingView((open) => !open)}>Save view</button><button type="button" className="button ghost filter-action-button filter-clear-button" onClick={() => setFilters(emptyFilter)}><X size={15} />Clear</button></div>}
     </div>
     {savingView && <form className="toolbar saved-filter-row" onSubmit={saveCurrentView}><input className="field" value={viewName} onChange={(event) => setViewName(event.target.value)} placeholder="Name this filter view" autoFocus /><button className="button primary">Save view</button><button type="button" className="button ghost" onClick={() => { setSavingView(false); setViewName(""); }}>Cancel</button></form>}
     {compact && advanced && <div className="toolbar filter-row advanced-filter-row">{locationFilters}</div>}
@@ -1077,7 +1081,7 @@ function InstallationForm({
         filled += 1;
       }
 
-      const contactIncoming = { name: values.beneficiaryName, role: values.beneficiaryRole, phone: values.beneficiaryPhone };
+      const contactIncoming = { name: values.beneficiaryName, role: "", phone: values.beneficiaryPhone };
       const hasContact = Object.values(contactIncoming).some(Boolean);
       const previousContact = autoContactValue.current;
       if (!hasContact && previousContact) {
@@ -1294,7 +1298,7 @@ function InstallationForm({
         {!pastePanelOpen && extractionSummary && <div className="paste-report-summary" role="status"><div><strong>{extractionSummary.source === "gemini" ? "Gemini check applied" : "Report extracted"}</strong><span className="small muted">{extractionSummary.filled} values filled, {extractionSummary.missing} expected values missing.</span></div><button type="button" className="button" onClick={() => setPastePanelOpen(true)}>Reopen</button>{extractionSummary.warnings.length > 0 && <ul>{extractionSummary.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}{extractionSummary.diagnostics.length > 0 && <div className="small muted paste-report-diagnostics">{extractionSummary.diagnostics.join(" ")}</div>}</div>}
       </section>}
       {initial && <section className="section ownership-grid" aria-label="Saved record metadata"><div><span className="small muted">Created by</span><strong>{record.createdBy}</strong></div><div><span className="small muted">Created</span><strong>{niceDateTime(record.createdAt)}</strong></div><div><span className="small muted">Updated by</span><strong>{record.updatedBy}</strong></div><div><span className="small muted">Last saved</span><strong>{niceDateTime(record.updatedAt)}</strong></div></section>}
-      <section id="site-details-section" className="section site-details-polish site-details-guided"><div className="section-title"><div><h2>Site details</h2><span className="small muted">Identity, ownership, and current installation state</span></div><div className="toolbar"><button type="button" className="button" disabled={saving || deleting || !record.id.trim() || !record.siteName.trim()} onClick={() => void copySiteDetailsLabel()} title="Copy ELRN school label"><ClipboardCopy size={15} />{siteDetailsCopyState === "copied" ? "Copied Site Label" : siteDetailsCopyState === "error" ? "Copy failed" : "Copy Site Label"}</button><button type="button" className="button" disabled={saving || deleting || !record.id.trim()} onClick={() => void copyRouterContactRow()} title="Copy School ID, site name, Ruijie serial, contact person, and contact number"><ClipboardCopy size={15} />{routerContactCopyState === "copied" ? "Copied router contact" : routerContactCopyState === "error" ? "Copy failed" : "Copy router contact"}</button></div></div><div className="grid-3">
+      <section id="site-details-section" className="section site-details-polish site-details-guided"><div className="section-title"><div><h2>Site details</h2><span className="small muted">Identity, ownership, and current installation state</span></div><div className="toolbar"><button type="button" className="button" disabled={saving || deleting || !record.id.trim() || !record.siteName.trim()} onClick={() => void copySiteDetailsLabel()} title="Copy ELRN school label"><ClipboardCopy size={15} />{siteDetailsCopyState === "copied" ? "Copied Site Label" : siteDetailsCopyState === "error" ? "Copy failed" : "Copy Site Label"}</button><button type="button" className="button" disabled={saving || deleting || !record.id.trim()} onClick={() => void copyRouterContactRow()} title="Copy School ID, site name, Ruijie serial, contact person, and contact number"><ClipboardCopy size={15} />{routerContactCopyState === "copied" ? "Copied Details" : routerContactCopyState === "error" ? "Copy failed" : "Copy Details"}</button></div></div><div className="grid-3">
         <label className="school-lookup">Site name<input required className="field" role="combobox" aria-autocomplete="list" aria-expanded={schoolLookupOpen && schoolMatches.length > 0} aria-controls="school-directory-results" value={record.siteName} onFocus={() => setSchoolLookupOpen(true)} onBlur={() => window.setTimeout(() => setSchoolLookupOpen(false), 120)} onKeyDown={schoolLookupKeyDown} onChange={(e) => { patch({ siteName: e.target.value }); setSchoolLookupOpen(true); setSchoolLookupNotice(""); }} placeholder="Search or enter a school name" />{schoolLookupOpen && record.siteName.trim().length >= 2 && schoolMatches.length > 0 && <div className="school-lookup-results" id="school-directory-results" role="listbox">{schoolMatches.map((entry, index) => <button type="button" className={`school-lookup-option ${index === schoolLookupIndex ? "active" : ""}`} role="option" aria-selected={index === schoolLookupIndex} key={entry.id} onMouseDown={(event) => event.preventDefault()} onClick={() => selectDirectorySchool(entry)}><span className="school-lookup-name">{entry.schoolName}</span><span className="school-lookup-province">{entry.province || "Province unavailable"}</span></button>)}</div>}</label>
         <label>School ID<input required className="field" value={record.id} onChange={(e) => patch({ id: e.target.value })} placeholder="School ID" /></label>
         <label>Solution<select className="select" value={record.unitType} onChange={(e) => patch({ unitType: e.target.value })}>{activeOptions(refs.unitTypes, record.unitType).map((x) => <option key={x.id}>{x.name}</option>)}</select></label>
@@ -1328,7 +1332,6 @@ function InstallationForm({
       <section className="section"><div className="section-title equipment-section-title"><div><h2>Beneficiary contact</h2><span className="small muted">Optional school or site contacts for coordination</span></div><button type="button" className="button" onClick={addBeneficiaryContact}><Plus size={15} />Add contact person</button></div><div className="equipment-list">
         {beneficiaryContacts.map((contact, index) => <div className="component-template-row" key={contact.id}><div className="component-row">
           <label>Name<input className="field" value={contact.name} onChange={(e) => beneficiaryContactPatch(contact.id, { name: e.target.value })} placeholder="Contact person" /></label>
-          <label>Role<input className="field" value={contact.role} onChange={(e) => beneficiaryContactPatch(contact.id, { role: e.target.value })} placeholder="Principal, coordinator, or custodian" /></label>
           <label>Phone number<input className="field" value={contact.phone} onChange={(e) => beneficiaryContactPatch(contact.id, { phone: e.target.value })} placeholder="Mobile or landline" /></label>
           {index > 0 && <span className="component-actions"><button type="button" className="button icon-button danger" aria-label="Remove contact person" title="Remove contact person" onClick={() => removeBeneficiaryContact(contact.id)}><Trash2 size={16} /></button></span>}
         </div></div>)}
@@ -1462,7 +1465,7 @@ function ImportRecords({ refs, records, notify, onSaved }: { refs: ReferenceData
     const wb = await createWorkbook();
     const customFields = (refs.customFields ?? []).filter((field) => field.active).sort((a, b) => a.order - b.order);
     const componentLabels = Array.from(new Set(refs.componentTypes.flatMap((type) => (type.fields ?? []).filter((field) => field.active).map((field) => libraryField(refs, field)?.label).filter(Boolean) as string[])));
-    wb.addWorksheet("Installations").addRows([["External Ref", "Site Name", "School ID", "Solution", "Contractor", "Installer / Team Lead", "Install Date", "Activation Date", "Status", "Island Group", "Region", "Region Code", "Province", "Province Code", "Locality", "Locality Code", "Barangay", "Barangay Code", "Longitude", "Latitude", "Beneficiary Name", "Beneficiary Role", "Beneficiary Phone", "Additional Beneficiary Contacts", "Remarks", ...customFields.map((field) => field.label)], ["ROW-001", "Cebu Hub 01", "SCH-0001", "Satellite broadband", refs.contractors.find((x) => x.active)?.name ?? "", "Team Lead A", today(), today(), "installed", "Visayas", "Region VII (Central Visayas)", "0700000000", "Cebu", "0730600000", "Cebu City", "30600", "", "", "121.0000", "14.0000", "Juan Dela Cruz", "School coordinator", "0917 000 0000", JSON.stringify([{ name: "Maria Santos", role: "ICT coordinator", phone: "0918 000 0000" }]), "", ...customFields.map(() => "")]]);
+    wb.addWorksheet("Installations").addRows([["External Ref", "Site Name", "School ID", "Solution", "Contractor", "Installer / Team Lead", "Install Date", "Activation Date", "Status", "Island Group", "Region", "Region Code", "Province", "Province Code", "Locality", "Locality Code", "Barangay", "Barangay Code", "Longitude", "Latitude", "Beneficiary Name", "Beneficiary Phone", "Additional Beneficiary Contacts", "Remarks", ...customFields.map((field) => field.label)], ["ROW-001", "Cebu Hub 01", "SCH-0001", "Satellite broadband", refs.contractors.find((x) => x.active)?.name ?? "", "Team Lead A", today(), today(), "installed", "Visayas", "Region VII (Central Visayas)", "0700000000", "Cebu", "0730600000", "Cebu City", "30600", "", "", "121.0000", "14.0000", "Juan Dela Cruz", "0917 000 0000", JSON.stringify([{ name: "Maria Santos", phone: "0918 000 0000" }]), "", ...customFields.map(() => "")]]);
     wb.addWorksheet("Components").addRows([["Site Ref", "Component Type", "Notes", ...componentLabels], ["ROW-001", "Modem", "", ...componentLabels.map((label) => label === "Serial number" ? "MDM-00001" : label === "MAC address" ? "A4:5E:60:11:28:9C" : "")]]);
     wb.addWorksheet("Instructions").addRows([
       ["FieldTrack site import guide"],
@@ -1498,9 +1501,9 @@ function ImportRecords({ refs, records, notify, onSaved }: { refs: ReferenceData
       const issue = !siteName ? "Missing site name" : !schoolId ? "Missing school ID" : records.some((record) => record.id.toLowerCase() === schoolId.toLowerCase()) ? "Duplicate school ID" : !refs.unitTypes.some((option) => option.active && option.name === unitType) ? "Unknown solution" : !refs.contractors.some((option) => option.active && option.name === contractor) ? "Unknown contractor" : !status ? "Invalid status" : location.issue || customIssue || "";
       if (!issue && location.location) {
         const now = new Date().toISOString();
-        const firstContact = { id: crypto.randomUUID(), name: String(r["Beneficiary Name"] ?? ""), role: String(r["Beneficiary Role"] ?? ""), phone: String(r["Beneficiary Phone"] ?? "") };
+        const firstContact = { id: crypto.randomUUID(), name: String(r["Beneficiary Name"] ?? ""), role: "", phone: String(r["Beneficiary Phone"] ?? "") };
         const beneficiaryContacts = [firstContact, ...parseAdditionalBeneficiaryContacts(r["Additional Beneficiary Contacts"])].filter(contactHasValue);
-        const record: Installation = { id: schoolId, siteName, unitType, contractor, installerTeamLead: String(r["Installer / Team Lead"] ?? r["Installer Team Lead"] ?? ""), installDate: String(r["Install Date"] || today()), activationDate: String(r["Activation Date"] || today()), status: status as Status, ...location.location, longitude: String(r.Longitude ?? ""), latitude: String(r.Latitude ?? ""), beneficiaryContacts, beneficiaryName: beneficiaryContacts[0]?.name || "", beneficiaryRole: beneficiaryContacts[0]?.role || "", beneficiaryPhone: beneficiaryContacts[0]?.phone || "", remarks: String(r.Remarks ?? ""), components: [], customValues: Object.fromEntries((refs.customFields ?? []).map((field) => [field.id, String(r[field.label] ?? "")])), photos: [], createdBy: "Imported workbook", createdAt: now, updatedBy: "Imported workbook", updatedAt: now, serviceVisits: [], auditEvents: [] };
+        const record: Installation = { id: schoolId, siteName, unitType, contractor, installerTeamLead: String(r["Installer / Team Lead"] ?? r["Installer Team Lead"] ?? ""), installDate: String(r["Install Date"] || today()), activationDate: String(r["Activation Date"] || today()), status: status as Status, ...location.location, longitude: String(r.Longitude ?? ""), latitude: String(r.Latitude ?? ""), beneficiaryContacts, beneficiaryName: beneficiaryContacts[0]?.name || "", beneficiaryRole: "", beneficiaryPhone: beneficiaryContacts[0]?.phone || "", remarks: String(r.Remarks ?? ""), components: [], customValues: Object.fromEntries((refs.customFields ?? []).map((field) => [field.id, String(r[field.label] ?? "")])), photos: [], createdBy: "Imported workbook", createdAt: now, updatedBy: "Imported workbook", updatedAt: now, serviceVisits: [], auditEvents: [] };
         siteByRef.set(String(r["External Ref"] ?? ""), record);
       }
       return { row: i + 2, kind: "Site" as const, subject: siteName, details: contractor, reference: location.location ? locationLabel(location.location) : `${r.Barangay ?? ""}, ${r.Locality || r["City/Municipality"] || ""}`, valid: !issue, issue };
@@ -1829,8 +1832,8 @@ function ComponentTypeSettings({ componentType: type, equipmentFields, otherType
 
 function installationRows(records: Installation[], refs: ReferenceData) {
   const fields = [...(refs.customFields ?? [])].sort((a, b) => a.order - b.order);
-  const header = ["Site Name", "School ID", "Solution", "Contractor", "Installer / Team Lead", "Install Date", "Activation Date", "Status", "Island Group", "Region", "Province", "Locality", "Barangay", "Longitude", "Latitude", "Beneficiary Name", "Beneficiary Role", "Beneficiary Phone", "Additional Beneficiary Contacts", "Remarks", ...fields.map((field) => field.label)];
-  return [header, ...records.map((r) => [r.siteName, r.id, r.unitType, r.contractor, r.installerTeamLead, r.installDate, r.activationDate ?? "", r.status, r.islandGroup, r.region, r.province, r.municipality, r.barangay, r.longitude, r.latitude, r.beneficiaryName, r.beneficiaryRole, r.beneficiaryPhone, additionalBeneficiaryContactsValue(r), r.remarks, ...fields.map((field) => (r.customValues ?? {})[field.id] ?? "")])];
+  const header = ["Site Name", "School ID", "Solution", "Contractor", "Installer / Team Lead", "Install Date", "Activation Date", "Status", "Island Group", "Region", "Province", "Locality", "Barangay", "Longitude", "Latitude", "Beneficiary Name", "Beneficiary Phone", "Additional Beneficiary Contacts", "Remarks", ...fields.map((field) => field.label)];
+  return [header, ...records.map((r) => [r.siteName, r.id, r.unitType, r.contractor, r.installerTeamLead, r.installDate, r.activationDate ?? "", r.status, r.islandGroup, r.region, r.province, r.municipality, r.barangay, r.longitude, r.latitude, r.beneficiaryName, r.beneficiaryPhone, additionalBeneficiaryContactsValue(r), r.remarks, ...fields.map((field) => (r.customValues ?? {})[field.id] ?? "")])];
 }
 
 function downloadCsv(records: Installation[], refs: ReferenceData) {
@@ -1895,7 +1898,7 @@ function xlsxInstallationRows(records: Installation[], refs: ReferenceData) {
     const outdoorAccessPoint = activeComponents.find((component) => isAccessPoint(component.type) && exportMatchKey(component.type).includes("outdoor"));
     const ruijieRouter = activeComponents.find((component) => { const type = exportMatchKey(component.type); return type.includes("ruijie") && type.includes("router"); });
     const contacts = beneficiaryContactList(record).filter(contactHasValue);
-    return [index + 1, record.id, record.siteName, record.islandGroup, record.region, record.province, record.municipality, record.barangay, record.longitude, record.latitude, equipmentFieldValue(starlink, refs, "kit"), record.activationDate ?? "", equipmentFieldValue(indoorAccessPoints[0], refs, "serial"), equipmentFieldValue(indoorAccessPoints[1], refs, "serial"), equipmentFieldValue(outdoorAccessPoint, refs, "serial"), equipmentFieldValue(ruijieRouter, refs, "serial"), record.contractor, record.installerTeamLead, record.installDate, contacts.map((contact) => contact.name.trim()).join("\n"), contacts.map((contact) => contact.role.trim()).join("\n"), contacts.map((contact) => contact.phone.trim()).join("\n"), record.remarks];
+    return [index + 1, record.id, record.siteName, record.islandGroup, record.region, record.province, record.municipality, record.barangay, record.longitude, record.latitude, equipmentFieldValue(starlink, refs, "kit"), record.activationDate ?? "", equipmentFieldValue(indoorAccessPoints[0], refs, "serial"), equipmentFieldValue(indoorAccessPoints[1], refs, "serial"), equipmentFieldValue(outdoorAccessPoint, refs, "serial"), equipmentFieldValue(ruijieRouter, refs, "serial"), record.contractor, record.installerTeamLead, record.installDate, contacts.map((contact) => contact.name.trim()).join("\n"), "", contacts.map((contact) => contact.phone.trim()).join("\n"), record.remarks];
   })];
 }
 

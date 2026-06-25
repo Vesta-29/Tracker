@@ -120,9 +120,14 @@ h3 { font-size: 14px; margin: 0; }
 .filter-row > .input-wrap, .filter-row > .field.search { flex: 1 1 auto; width: auto; min-width: 240px; }
 .filter-row > .input-wrap .field.search { width: 100%; }
 .filter-row > .select { flex: 0 0 160px; width: 160px; min-width: 160px; }
+.filter-row > .updated-by-filter { flex-basis: 132px; width: 132px; min-width: 132px; }
 .filter-row > .saved-view-select { flex-basis: 150px; width: 150px; min-width: 150px; }
 .filter-row > .field:not(.search) { flex: 0 0 148px; width: 148px; min-width: 148px; }
 .filter-row > .button { flex: 0 0 auto; width: auto; min-width: auto; }
+.filter-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; margin-left: auto; padding-left: 8px; border-left: 1px solid var(--line); }
+.filter-actions .filter-action-button { min-height: 34px; padding: 0 10px; color: var(--ink-muted); font-size: 13px; }
+.filter-actions .filter-action-button:hover { color: var(--ink); }
+.filter-actions .filter-clear-button { padding-left: 8px; }
 .advanced-filter-trigger span { min-width: 19px; padding: 2px 5px; border-radius: 99px; color: var(--accent); background: var(--accent-soft); font-size: 11px; }
 .advanced-filter-trigger.active { border-color: oklch(0.72 0.07 164); color: var(--accent); }
 .advanced-filter-trigger svg { transition: transform 160ms var(--ease-out); }
