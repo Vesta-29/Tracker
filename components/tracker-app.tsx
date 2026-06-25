@@ -952,7 +952,7 @@ function InstallationForm({
   const [excelCopyState, setExcelCopyState] = useState<"idle" | "first" | "last" | "error">("idle");
   const [latLongCopyState, setLatLongCopyState] = useState<"idle" | "copied" | "error">("idle");
   const [plusCodeCopyState, setPlusCodeCopyState] = useState<"idle" | "copied" | "error">("idle");
-  const [siteDetailsCopyState, setSiteDetailsCopyState] = useState<"idle" | "copied" | "error">("idle");
+  const [siteDetailsCopyState, setSiteDetailsCopyState] = useState<"idle" | "starlink" | "project" | "error">("idle");
   const validationSummaryRef = useRef<HTMLDivElement>(null);
   useBlobUrlCleanup(record.photos);
 
@@ -1292,10 +1292,20 @@ function InstallationForm({
       setPlusCodeCopyState("error");
     }
   }
-  async function copySiteDetailsLabel() {
+  async function copyStarlinkLabel() {
     try {
       await navigator.clipboard.writeText(["ELRN", record.id.trim(), record.siteName.trim()].join("-"));
-      setSiteDetailsCopyState("copied");
+      setSiteDetailsCopyState("starlink");
+      window.setTimeout(() => setSiteDetailsCopyState("idle"), 2400);
+    } catch {
+      setSiteDetailsCopyState("error");
+    }
+  }
+  async function copyProjectName() {
+    try {
+      const level = record.islandGroup === "Luzon" ? "L1" : record.islandGroup === "Visayas" ? "L2" : record.islandGroup === "Mindanao" ? "L3" : "L4";
+      await navigator.clipboard.writeText(`ELRN-${level}-${record.id.trim()}_${record.siteName.trim()}`);
+      setSiteDetailsCopyState("project");
       window.setTimeout(() => setSiteDetailsCopyState("idle"), 2400);
     } catch {
       setSiteDetailsCopyState("error");
@@ -1367,7 +1377,7 @@ function InstallationForm({
         {!pastePanelOpen && extractionSummary && <div className="paste-report-summary" role="status"><div><strong>{extractionSummary.source === "gemini" ? "Gemini check applied" : "Report extracted"}</strong><span className="small muted">{extractionSummary.filled} values filled, {extractionSummary.missing} expected values missing.</span></div><button type="button" className="button" onClick={() => setPastePanelOpen(true)}>Reopen</button>{extractionSummary.warnings.length > 0 && <ul>{extractionSummary.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}{extractionSummary.diagnostics.length > 0 && <div className="small muted paste-report-diagnostics">{extractionSummary.diagnostics.join(" ")}</div>}</div>}
       </section>}
       {initial && <section className="section ownership-grid" aria-label="Saved record metadata"><div><span className="small muted">Created by</span><strong>{record.createdBy}</strong></div><div><span className="small muted">Created</span><strong>{niceDateTime(record.createdAt)}</strong></div><div><span className="small muted">Updated by</span><strong>{record.updatedBy}</strong></div><div><span className="small muted">Last saved</span><strong>{niceDateTime(record.updatedAt)}</strong></div></section>}
-      <section id="site-details-section" className="section site-details-polish site-details-guided"><div className="section-title"><div><h2>Site details</h2><span className="small muted">Identity, ownership, and current installation state</span></div><div className="toolbar"><button type="button" className="button" disabled={saving || deleting || !record.id.trim() || !record.siteName.trim()} onClick={() => void copySiteDetailsLabel()} title="Copy ELRN school label"><ClipboardCopy size={15} />{siteDetailsCopyState === "copied" ? "Copied Site Label" : siteDetailsCopyState === "error" ? "Copy failed" : "Copy Site Label"}</button></div></div><div className="grid-3">
+      <section id="site-details-section" className="section site-details-polish site-details-guided"><div className="section-title"><div><h2>Site details</h2><span className="small muted">Identity, ownership, and current installation state</span></div><div className="toolbar"><button type="button" className="button" disabled={saving || deleting || !record.id.trim() || !record.siteName.trim()} onClick={() => void copyStarlinkLabel()} title="Copy ELRN Starlink label"><ClipboardCopy size={15} />{siteDetailsCopyState === "starlink" ? "Copied Starlink Label" : siteDetailsCopyState === "error" ? "Copy failed" : "Copy Starlink Label"}</button><button type="button" className="button" disabled={saving || deleting || !record.id.trim() || !record.siteName.trim()} onClick={() => void copyProjectName()} title="Copy ELRN project name"><ClipboardCopy size={15} />{siteDetailsCopyState === "project" ? "Copied Project Name" : siteDetailsCopyState === "error" ? "Copy failed" : "Copy Project Name"}</button></div></div><div className="grid-3">
         <label className="school-lookup">Site name<input id="site-name-input" required className="field" role="combobox" aria-autocomplete="list" aria-expanded={schoolLookupOpen && schoolMatches.length > 0} aria-controls="school-directory-results" aria-invalid={Boolean((triedSubmit && missingSiteName) || duplicate) || undefined} aria-describedby={siteNameDescriptions} value={record.siteName} onFocus={() => setSchoolLookupOpen(true)} onBlur={() => window.setTimeout(() => setSchoolLookupOpen(false), 120)} onKeyDown={schoolLookupKeyDown} onChange={(e) => { patch({ siteName: e.target.value }); setSchoolLookupOpen(true); setSchoolLookupNotice(""); }} placeholder="Search or enter a school name" />{schoolLookupOpen && record.siteName.trim().length >= 2 && schoolMatches.length > 0 && <div className="school-lookup-results" id="school-directory-results" role="listbox">{schoolMatches.map((entry, index) => <button type="button" className={`school-lookup-option ${index === schoolLookupIndex ? "active" : ""}`} role="option" aria-selected={index === schoolLookupIndex} key={entry.id} onMouseDown={(event) => event.preventDefault()} onClick={() => selectDirectorySchool(entry)}><span className="school-lookup-name">{entry.schoolName}</span><span className="school-lookup-province">{entry.province || "Province unavailable"}</span></button>)}</div>}</label>
         <label>School ID<input id="school-id-input" required className="field" aria-invalid={Boolean((triedSubmit && !schoolId) || duplicateSchoolId) || undefined} aria-describedby={schoolIdDescriptions} value={record.id} onChange={(e) => patch({ id: e.target.value })} placeholder="School ID" /></label>
         <label>Solution<select id="solution-input" className="select" aria-invalid={Boolean(triedSubmit && missingUnitType) || undefined} aria-describedby={triedSubmit && missingUnitType ? "solution-required-error" : undefined} value={record.unitType} onChange={(e) => patch({ unitType: e.target.value })}>{activeOptions(refs.unitTypes, record.unitType).map((x) => <option key={x.id}>{x.name}</option>)}</select></label>
@@ -1942,8 +1952,7 @@ function installationExcelClipboardRow(record: Installation, refs: ReferenceData
     record.activationDate ?? "",
     record.installerTeamLead,
     record.contractor,
-    record.region,
-    record.installDate,
+    "",
     record.updatedBy,
     "",
     record.remarks,
