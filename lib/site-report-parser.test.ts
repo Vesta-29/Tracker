@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseSiteActivationReport } from "./site-report-parser";
+import { parseContractorAddress, parseSiteActivationReport } from "./site-report-parser";
 
 const cabangahanReport = `LOG-IN
 Hi Comclark Activation Team - for your assistance on activation of Starlink and Access Points.
@@ -131,5 +131,14 @@ Teacher II
       longitude: "123.239024",
     });
     expect(parenthesized.diagnostics).toContain("Flag Pole coordinates selected for the site.");
+  });
+
+  it("normalizes contractor-provided address paste formats", () => {
+    expect(parseContractorAddress(`Complete School Address (to be verified by the teacher/principal):
+
+BRGY. ZONE 16, TALISAY CITY, NEG. OCC.`)).toBe("BRGY. ZONE 16, TALISAY CITY, NEG. OCC.");
+    expect(parseContractorAddress("Complete School Address (to be verified by the teacher/principal): BRGY. ZONE 16, TALISAY CITY, NEG. OCC.")).toBe("BRGY. ZONE 16, TALISAY CITY, NEG. OCC.");
+    expect(parseContractorAddress("BRGY. ZONE 16, TALISAY CITY, NEG. OCC.")).toBe("BRGY. ZONE 16, TALISAY CITY, NEG. OCC.");
+    expect(parseSiteActivationReport("School Name: Test ES\nComplete School Address (to be verified by the teacher/principal): BRGY. ZONE 16, TALISAY CITY, NEG. OCC.").values.address).toBe("BRGY. ZONE 16, TALISAY CITY, NEG. OCC.");
   });
 });

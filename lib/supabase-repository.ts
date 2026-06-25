@@ -262,7 +262,7 @@ async function mapVisit(row: any): Promise<ServiceVisit> {
 async function mapInstallation(row: any, locationNames: Map<string, string>): Promise<Installation> {
   const location = { islandGroup: getIslandGroup(row.region_code) || "", region: locationNames.get(row.region_code) || "", regionCode: row.region_code, province: locationNames.get(row.province_code) || "", provinceCode: row.province_code || "", municipality: locationNames.get(row.municipality_code) || "", municipalityCode: row.municipality_code, barangay: locationNames.get(row.barangay_code) || "", barangayCode: row.barangay_code };
   const contacts = beneficiaryContacts(row);
-  return { id: row.school_id, dbId: row.id, siteName: row.site_name || "", legacyKitNumber: row.kit_number || undefined, unitType: value(row.unitType)?.name || "", contractor: value(row.contractor)?.name || "", installerTeamLead: row.installer_team_lead || "", installDate: row.install_date, activationDate: row.activation_date || undefined, status: row.status, ...location, longitude: row.longitude == null ? "" : String(row.longitude), latitude: row.latitude == null ? "" : String(row.latitude), beneficiaryContacts: contacts, beneficiaryName: contacts[0]?.name || "", beneficiaryRole: contacts[0]?.role || "", beneficiaryPhone: contacts[0]?.phone || "", remarks: row.remarks || "", components: row.installation_components.map(mapComponent), customValues: Object.fromEntries(row.installation_custom_values.map((item: any) => [item.field_id, item.value])), photos: await signedPhotos("installation-photos", row.installation_photos), createdBy: value(row.createdBy)?.full_name || "System", createdAt: row.created_at, updatedBy: value(row.updatedBy)?.full_name || "System", updatedAt: row.updated_at, serviceVisits: await Promise.all((row.service_visits || []).map(mapVisit)), auditEvents: (row.audit_events || []).map(mapAudit) };
+  return { id: row.school_id, dbId: row.id, siteName: row.site_name || "", legacyKitNumber: row.kit_number || undefined, unitType: value(row.unitType)?.name || "", contractor: value(row.contractor)?.name || "", installerTeamLead: row.installer_team_lead || "", installDate: row.install_date, activationDate: row.activation_date || undefined, status: row.status, ...location, contractorAddress: row.contractor_address || "", longitude: row.longitude == null ? "" : String(row.longitude), latitude: row.latitude == null ? "" : String(row.latitude), beneficiaryContacts: contacts, beneficiaryName: contacts[0]?.name || "", beneficiaryRole: contacts[0]?.role || "", beneficiaryPhone: contacts[0]?.phone || "", remarks: row.remarks || "", components: row.installation_components.map(mapComponent), customValues: Object.fromEntries(row.installation_custom_values.map((item: any) => [item.field_id, item.value])), photos: await signedPhotos("installation-photos", row.installation_photos), createdBy: value(row.createdBy)?.full_name || "System", createdAt: row.created_at, updatedBy: value(row.updatedBy)?.full_name || "System", updatedAt: row.updated_at, serviceVisits: await Promise.all((row.service_visits || []).map(mapVisit)), auditEvents: (row.audit_events || []).map(mapAudit) };
 }
 async function locationNamesFor(rows: any[]) {
   const codes = [...new Set(rows.flatMap((row) => [row.region_code, row.province_code, row.municipality_code, row.barangay_code]).filter(Boolean))];
@@ -278,7 +278,7 @@ function mapInstallationSummary(row: any, locationNames: Map<string, string>): I
     islandGroup: getIslandGroup(row.region_code) || "", region: locationNames.get(row.region_code) || "", regionCode: row.region_code,
     province: locationNames.get(row.province_code) || "", provinceCode: row.province_code || "", municipality: locationNames.get(row.municipality_code) || "",
     municipalityCode: row.municipality_code, barangay: locationNames.get(row.barangay_code) || "", barangayCode: row.barangay_code,
-    longitude: row.longitude == null ? "" : String(row.longitude), latitude: row.latitude == null ? "" : String(row.latitude), beneficiaryContacts: contacts, beneficiaryName: contacts[0]?.name || "", beneficiaryRole: contacts[0]?.role || "", beneficiaryPhone: contacts[0]?.phone || "", remarks: row.remarks || "", components: row.installation_components ?? [],
+    contractorAddress: row.contractor_address || "", longitude: row.longitude == null ? "" : String(row.longitude), latitude: row.latitude == null ? "" : String(row.latitude), beneficiaryContacts: contacts, beneficiaryName: contacts[0]?.name || "", beneficiaryRole: contacts[0]?.role || "", beneficiaryPhone: contacts[0]?.phone || "", remarks: row.remarks || "", components: row.installation_components ?? [],
     customValues: Object.fromEntries((row.installation_custom_values || []).map((item: any) => [item.field_id, item.value])),
     photos: [], createdBy: value(row.createdBy)?.full_name || "System", createdAt: row.created_at, updatedBy: value(row.updatedBy)?.full_name || "System",
     updatedAt: row.updated_at, serviceVisits: row.service_visits ?? [], auditEvents: [],
@@ -287,7 +287,7 @@ function mapInstallationSummary(row: any, locationNames: Map<string, string>): I
 
 export async function loadInstallationSummaries() {
   const { data, error } = await supabase().from("installations").select(`
-    id,school_id,site_name,kit_number,installer_team_lead,install_date,activation_date,status,region_code,province_code,municipality_code,barangay_code,longitude,latitude,beneficiary_contacts,beneficiary_name,beneficiary_role,beneficiary_phone,remarks,created_at,updated_at,
+    id,school_id,site_name,kit_number,installer_team_lead,install_date,activation_date,status,region_code,province_code,municipality_code,barangay_code,contractor_address,longitude,latitude,beneficiary_contacts,beneficiary_name,beneficiary_role,beneficiary_phone,remarks,created_at,updated_at,
     unitType:unit_types(name),contractor:contractors(name),createdBy:profiles!installations_created_by_fkey(full_name),updatedBy:profiles!installations_updated_by_fkey(full_name),
     installation_custom_values(field_id,value),installation_components(id)
   `).order("install_date", { ascending: false });
@@ -298,7 +298,7 @@ export async function loadInstallationSummaries() {
 
 export async function loadServiceVisitSummaries() {
   const { data, error } = await supabase().from("installations").select(`
-    id,school_id,site_name,kit_number,installer_team_lead,install_date,activation_date,status,region_code,province_code,municipality_code,barangay_code,longitude,latitude,beneficiary_contacts,beneficiary_name,beneficiary_role,beneficiary_phone,remarks,created_at,updated_at,
+    id,school_id,site_name,kit_number,installer_team_lead,install_date,activation_date,status,region_code,province_code,municipality_code,barangay_code,contractor_address,longitude,latitude,beneficiary_contacts,beneficiary_name,beneficiary_role,beneficiary_phone,remarks,created_at,updated_at,
     unitType:unit_types(name),contractor:contractors(name),createdBy:profiles!installations_created_by_fkey(full_name),updatedBy:profiles!installations_updated_by_fkey(full_name),
     installation_components(id),
     service_visits(id,display_id,status,ticket_reference,scheduled_date,completed_date,notes,created_at,updated_at,type:service_visit_types(name),contractor:contractors(name),createdBy:profiles!service_visits_created_by_fkey(full_name),updatedBy:profiles!service_visits_updated_by_fkey(full_name))
@@ -338,7 +338,7 @@ export async function loadInstallationDuplicateValidationRecords() {
   return data.map((row) => ({
     id: row.school_id, dbId: row.id, siteName: row.site_name || "", unitType: "", contractor: "", installerTeamLead: "", installDate: "", status: "scheduled" as const,
     islandGroup: "" as const, region: "", regionCode: "", province: "", provinceCode: "", municipality: "", municipalityCode: "", barangay: "", barangayCode: "",
-    longitude: "", latitude: "", beneficiaryContacts: [], beneficiaryName: "", beneficiaryRole: "", beneficiaryPhone: "", remarks: "", components: row.installation_components.map(mapComponent), customValues: {}, photos: [], createdBy: "", createdAt: "", updatedBy: "",
+    contractorAddress: "", longitude: "", latitude: "", beneficiaryContacts: [], beneficiaryName: "", beneficiaryRole: "", beneficiaryPhone: "", remarks: "", components: row.installation_components.map(mapComponent), customValues: {}, photos: [], createdBy: "", createdAt: "", updatedBy: "",
     updatedAt: "", serviceVisits: [], auditEvents: [],
   }));
 }
@@ -366,7 +366,7 @@ export async function loadInstallationForVisitDisplayId(displayId: string) {
 
 export async function loadInstallationValidationRecords() {
   const { data, error } = await supabase().from("installations").select(`
-    id,school_id,site_name,kit_number,installer_team_lead,install_date,activation_date,status,region_code,province_code,municipality_code,barangay_code,longitude,latitude,beneficiary_contacts,beneficiary_name,beneficiary_role,beneficiary_phone,remarks,created_at,updated_at,
+    id,school_id,site_name,kit_number,installer_team_lead,install_date,activation_date,status,region_code,province_code,municipality_code,barangay_code,contractor_address,longitude,latitude,beneficiary_contacts,beneficiary_name,beneficiary_role,beneficiary_phone,remarks,created_at,updated_at,
     unitType:unit_types(name),contractor:contractors(name),createdBy:profiles!installations_created_by_fkey(full_name),updatedBy:profiles!installations_updated_by_fkey(full_name),
     installation_custom_values(field_id,value),installation_components(*,type:component_types(name),installation_component_values(field_definition_id,value,duplicate_mac_acknowledged))
   `).order("install_date", { ascending: false });

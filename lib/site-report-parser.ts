@@ -83,6 +83,11 @@ function labeledValue(text: string, field: SiteReportField) {
   return undefined;
 }
 
+export function parseContractorAddress(value: string, fallbackToRaw = true) {
+  const labeled = labeledValue(value, "address")?.value;
+  return clean(labeled || (fallbackToRaw ? value : ""));
+}
+
 const MONTHS: Record<string, number> = {
   jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3, apr: 4, april: 4,
   may: 5, jun: 6, june: 6, jul: 7, july: 7, aug: 8, august: 8, sep: 9,
@@ -189,6 +194,7 @@ export function parseSiteActivationReport(text: string): SiteReportExtraction {
   const coordinates = coordinateSections(text);
   const beneficiary = beneficiaryBlock(text);
   const raw = Object.fromEntries(SITE_REPORT_FIELDS.map((field) => [field, labeledValue(text, field)?.value ?? ""])) as SiteReportValues;
+  raw.address = parseContractorAddress(text, false);
   raw.latitude = coordinates.latitude;
   raw.longitude = coordinates.longitude;
   raw.commboxLatitude = coordinates.commboxLatitude;
