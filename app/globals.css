@@ -136,7 +136,10 @@ h3 { font-size: 14px; margin: 0; }
 .filter-row > .input-wrap .field.search { width: 100%; }
 .filter-row > .select { flex: 0 0 160px; width: 160px; min-width: 160px; }
 .filter-row > .updated-by-filter { flex-basis: 132px; width: 132px; min-width: 132px; }
-.filter-row > .saved-view-select { flex-basis: 150px; width: 150px; min-width: 150px; }
+.filter-row > .saved-view-control { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; }
+.saved-view-control .saved-view-select { width: 150px; min-width: 150px; }
+.saved-view-delete { width: 34px; height: 34px; min-height: 34px; color: var(--ink-muted); }
+.saved-view-delete:hover:not(:disabled) { color: var(--danger); }
 .filter-row > .field:not(.search) { flex: 0 0 148px; width: 148px; min-width: 148px; }
 .filter-row > .button { flex: 0 0 auto; width: auto; min-width: auto; }
 .filter-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; margin-left: auto; padding-left: 8px; border-left: 1px solid var(--line); }

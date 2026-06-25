@@ -475,7 +475,6 @@ export default function TrackerApp() {
     </>
   );
 }
-
 function RouteLoading({ pathname }: { pathname: string }) {
   const family = pathname === "/dashboard" ? "dashboard" : pathname === "/sites" || pathname === "/service-visits" ? "table" : pathname.startsWith("/admin/") ? "settings" : "form";
   return <div className={`route-loading route-loading-${family}`} aria-label="Loading page content" aria-live="polite" aria-busy="true"><div className="route-loading-head" /><div className="route-loading-copy" /><div className="route-loading-body"><span /><span /><span /><span /></div></div>;
@@ -592,6 +591,7 @@ function FilterBar({ records, refs, filters, setFilters, compact = false }: { re
   });
   const [savingView, setSavingView] = useState(false);
   const [viewName, setViewName] = useState("");
+  const [selectedSavedViewId, setSelectedSavedViewId] = useState("");
   const installDates = records.map((record) => record.installDate).filter(Boolean);
   const minDate = installDates.length ? installDates.reduce((a, b) => (a < b ? a : b)) : "";
   const maxDate = installDates.length ? installDates.reduce((a, b) => (a > b ? a : b)) : "";
@@ -612,9 +612,23 @@ function FilterBar({ records, refs, filters, setFilters, compact = false }: { re
     event.preventDefault();
     const name = viewName.trim();
     if (!name || !active) return;
-    persistSavedViews([...savedViews.filter((view) => view.name.localeCompare(name, undefined, { sensitivity: "base" }) !== 0), { id: uuid(), name, filters }]);
+    const savedView = { id: uuid(), name, filters };
+    persistSavedViews([...savedViews.filter((view) => view.name.localeCompare(name, undefined, { sensitivity: "base" }) !== 0), savedView]);
+    setSelectedSavedViewId(savedView.id);
     setViewName("");
     setSavingView(false);
+  }
+  function applySavedView(id: string) {
+    setSelectedSavedViewId(id);
+    const view = savedViews.find((item) => item.id === id);
+    if (view) setFilters(sanitizeSiteFilter(view.filters, records, refs));
+  }
+  function deleteSelectedSavedView() {
+    const view = savedViews.find((item) => item.id === selectedSavedViewId);
+    if (!view) return;
+    if (!window.confirm(`Delete saved view "${view.name}"?`)) return;
+    persistSavedViews(savedViews.filter((item) => item.id !== view.id));
+    setSelectedSavedViewId("");
   }
   const locationFilters = <>
     <select className="select" aria-label="Filter sites by island group" value={filters.islandGroup} onChange={(e) => setFilters({ ...filters, islandGroup: e.target.value, regionCode: "", provinceCode: "", municipalityCode: "", barangayCode: "" })}><option value="">All island groups</option>{availableIslandGroups.map((group) => <option key={group}>{group}</option>)}</select>
@@ -628,7 +642,7 @@ function FilterBar({ records, refs, filters, setFilters, compact = false }: { re
       <div className="input-wrap"><Search className="input-icon" size={17} /><input className="field search" data-site-search="true" aria-label="Search sites" value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} placeholder="Search site, school ID, or location" /></div>
       <select className="select" aria-label="Filter sites by contractor" value={filters.contractor} onChange={(e) => setFilters({ ...filters, contractor: e.target.value })}><option value="">All contractors</option>{refs.contractors.map((c) => <option key={c.id}>{c.name}</option>)}</select>
       <select className="select updated-by-filter" aria-label="Filter sites by updated by" value={filters.updatedBy} onChange={(e) => setFilters({ ...filters, updatedBy: e.target.value })}><option value="">Updated by</option>{updatedByOptions.map((name) => <option key={name}>{name}</option>)}</select>
-      {savedViews.length > 0 && <select className="select saved-view-select" aria-label="Apply saved site filter" value="" onChange={(event) => { const view = savedViews.find((item) => item.id === event.target.value); if (view) setFilters(sanitizeSiteFilter(view.filters, records, refs)); }}><option value="">Saved views</option>{savedViews.map((view) => <option value={view.id} key={view.id}>{view.name}</option>)}</select>}
+      {savedViews.length > 0 && <div className="saved-view-control"><select className="select saved-view-select" aria-label="Apply saved site filter" value={selectedSavedViewId} onChange={(event) => applySavedView(event.target.value)}><option value="">Saved views</option>{savedViews.map((view) => <option value={view.id} key={view.id}>{view.name}</option>)}</select><button type="button" className="button icon-button ghost saved-view-delete" disabled={!selectedSavedViewId} aria-label="Delete selected saved view" title="Delete selected saved view" onClick={deleteSelectedSavedView}><Trash2 size={15} /></button></div>}
       {compact ? <button type="button" className={`button advanced-filter-trigger ${advanced || activeLocationCount ? "active" : ""}`} aria-expanded={advanced} onClick={() => setAdvanced((open) => !open)}>Advanced filters{activeLocationCount > 0 && <span>{activeLocationCount}</span>}<ChevronDown size={14} /></button> : locationFilters}
       {active && <div className="filter-actions"><button type="button" className="button ghost filter-action-button" onClick={() => setSavingView((open) => !open)}>Save view</button><button type="button" className="button ghost filter-action-button filter-clear-button" onClick={() => setFilters(emptyFilter)}><X size={15} />Clear</button></div>}
     </div>
@@ -937,7 +951,6 @@ function InstallationForm({
   const [latLongCopyState, setLatLongCopyState] = useState<"idle" | "copied" | "error">("idle");
   const [plusCodeCopyState, setPlusCodeCopyState] = useState<"idle" | "copied" | "error">("idle");
   const [siteDetailsCopyState, setSiteDetailsCopyState] = useState<"idle" | "copied" | "error">("idle");
-  const [routerContactCopyState, setRouterContactCopyState] = useState<"idle" | "copied" | "error">("idle");
   const validationSummaryRef = useRef<HTMLDivElement>(null);
   useBlobUrlCleanup(record.photos);
 
@@ -1005,7 +1018,7 @@ function InstallationForm({
       setNewContractorName(values.contractor);
       setAddingContractor(true);
       setContractorError("");
-      warnings.push(`Contractor “${values.contractor}” is not in Settings. Review the prefilled Add contractor form.`);
+      warnings.push(`Contractor â€œ${values.contractor}â€ is not in Settings. Review the prefilled Add contractor form.`);
     }
     const hasSatelliteEquipment = Boolean(values.starlinkKitNumber || values.ap1IndoorSerial || values.ap2IndoorSerial || values.ap3OutdoorSerial);
     const solution = hasSatelliteEquipment ? refs.unitTypes.find((item) => item.active && /starlink|satellite/i.test(item.name)) : undefined;
@@ -1286,15 +1299,6 @@ function InstallationForm({
       setSiteDetailsCopyState("error");
     }
   }
-  async function copyRouterContactRow() {
-    try {
-      await navigator.clipboard.writeText(installationRouterContactClipboardRow(record, refs));
-      setRouterContactCopyState("copied");
-      window.setTimeout(() => setRouterContactCopyState("idle"), 2400);
-    } catch {
-      setRouterContactCopyState("error");
-    }
-  }
   async function openAudit() {
     setTab("audit");
     if (auditLoaded || auditLoading || !record.dbId || !fetchAuditEvents) return;
@@ -1344,7 +1348,7 @@ function InstallationForm({
   }
 
   return <form onSubmit={submit} data-save-shortcut="site-form" noValidate>
-    <div className="page-head site-record-head"><div><p className="eyebrow">{initial ? "Site record" : "New site"}</p><div className="site-record-heading-row"><h1>{initial ? initial.siteName || "Site name required" : "Add a site record"}</h1>{initial && <StatusPill status={record.status} refs={refs} />}</div>{initial && <div className="small muted record-id">School ID: {initial.id}</div>}<p className="muted site-record-description">{initial ? readOnly ? "Review site details, contractor visits, and change history." : "Update site details and deployed equipment." : "Review site details, contractor visits, and change history."}</p></div><div className="site-record-actions"><div className="site-record-main-actions"><button type="button" className="button" disabled={saving || deleting} onClick={() => { if (isDirty) { setShowExitModal(true); } else { onCancel(); } }}>Back to sites</button>{initial && !readOnly && onDelete && <button type="button" className="button danger" disabled={saving || deleting} onClick={() => setShowDeleteModal(true)}><Trash2 size={15} />Delete site</button>}{!readOnly && <button className="button primary" disabled={!isDirty || saving || deleting}>{saving ? "Saving..." : initial ? "Save changes" : "Save site"}</button>}</div><div className="site-record-copy-actions" aria-label="Copy Excel values"><button type="button" className="button ghost site-record-copy-button" disabled={saving || deleting} onClick={() => void copyForExcel("first")} title="Copy Island Group, Site Code, Site Name, and Site Complete Address"><ClipboardCopy size={14} />{excelCopyState === "first" ? "Copied school columns" : excelCopyState === "error" ? "Copy failed" : "Copy school columns"}</button><button type="button" className="button ghost site-record-copy-button" disabled={saving || deleting} onClick={() => void copyForExcel("last")} title="Copy Starlink kit, coordinates, activation, endorser, contractor, and region"><ClipboardCopy size={14} />{excelCopyState === "last" ? "Copied activation columns" : "Copy activation columns"}</button></div></div></div>
+    <div className="page-head site-record-head"><div><p className="eyebrow">{initial ? "Site record" : "New site"}</p><div className="site-record-heading-row"><h1>{initial ? initial.siteName || "Site name required" : "Add a site record"}</h1>{initial && <StatusPill status={record.status} refs={refs} />}</div>{initial && <div className="small muted record-id">School ID: {initial.id}</div>}<p className="muted site-record-description">{initial ? readOnly ? "Review site details, contractor visits, and change history." : "Update site details and deployed equipment." : "Review site details, contractor visits, and change history."}</p></div><div className="site-record-actions"><div className="site-record-main-actions"><button type="button" className="button" disabled={saving || deleting} onClick={() => { if (isDirty) { setShowExitModal(true); } else { onCancel(); } }}>Back to sites</button>{initial && !readOnly && onDelete && <button type="button" className="button danger" disabled={saving || deleting} onClick={() => setShowDeleteModal(true)}><Trash2 size={15} />Delete site</button>}{!readOnly && <button className="button primary" disabled={!isDirty || saving || deleting}>{saving ? "Saving..." : initial ? "Save changes" : "Save site"}</button>}</div><div className="site-record-copy-actions" aria-label="Copy Excel values"><button type="button" className="button ghost site-record-copy-button" disabled={saving || deleting} onClick={() => void copyForExcel("first")} title="Copy BEIS School ID, Site Name, and Site Complete Address"><ClipboardCopy size={14} />{excelCopyState === "first" ? "Copied site details" : excelCopyState === "error" ? "Copy failed" : "Copy site details"}</button><button type="button" className="button ghost site-record-copy-button" disabled={saving || deleting} onClick={() => void copyForExcel("last")} title="Copy Starlink activation columns"><ClipboardCopy size={14} />{excelCopyState === "last" ? "Copied activation columns" : "Copy activation columns"}</button></div></div></div>
     <div className="tabs" role="tablist" aria-label="Site record sections" onKeyDown={handleTabKeyDown}><button type="button" id="site-tab-overview" role="tab" aria-controls="site-panel-overview" aria-selected={tab === "overview"} tabIndex={tab === "overview" ? 0 : -1} className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}>Overview</button><button type="button" id="site-tab-visits" role="tab" aria-controls="site-panel-visits" aria-selected={tab === "visits"} tabIndex={tab === "visits" ? 0 : -1} className={tab === "visits" ? "active" : ""} onClick={() => void openVisits()}>Service visits {visitsLoaded && <span>{serviceVisits.length}</span>}</button><button type="button" id="site-tab-audit" role="tab" aria-controls="site-panel-audit" aria-selected={tab === "audit"} tabIndex={tab === "audit" ? 0 : -1} className={tab === "audit" ? "active" : ""} onClick={() => void openAudit()}>Change log {auditLoaded && <span>{auditEvents.length}</span>}</button></div>
     {triedSubmit && hasValidationError && <div className="notice validation-notice validation-summary inline" role="alert" tabIndex={-1} ref={validationSummaryRef}><strong>Check the highlighted site details before saving.</strong><ul>{validationItems.map((item) => <li key={item.id}><a href={`#${item.target}`} onClick={(event) => { event.preventDefault(); focusValidationTarget(item.target); }}>{item.text}</a></li>)}</ul></div>}
     {tab === "overview" && <div className="site-workflow-bar" aria-label="Overview workflow">
@@ -1355,13 +1359,13 @@ function InstallationForm({
     {tab === "overview" && <fieldset id="site-panel-overview" aria-labelledby="site-tab-overview" className="panel site-fields editing" role="tabpanel" disabled={readOnly}>
       {!initial && !readOnly && <section className="section paste-report-panel" aria-labelledby="paste-report-title">
         <button type="button" className="paste-report-disclosure" aria-expanded={pastePanelOpen} onClick={() => setPastePanelOpen((open) => !open)}>
-          <span className="paste-report-icon"><ClipboardPaste size={18} /></span><span><strong id="paste-report-title">Paste activation report</strong><small>{extractionSummary ? `${extractionSummary.filled} values filled · ${extractionSummary.missing} missing · ${extractionSummary.warnings.length} warnings` : "Extract school, location, equipment, and contact details"}</small></span><ChevronDown size={17} className={pastePanelOpen ? "open" : ""} />
+          <span className="paste-report-icon"><ClipboardPaste size={18} /></span><span><strong id="paste-report-title">Paste activation report</strong><small>{extractionSummary ? `${extractionSummary.filled} values filled Â· ${extractionSummary.missing} missing Â· ${extractionSummary.warnings.length} warnings` : "Extract school, location, equipment, and contact details"}</small></span><ChevronDown size={17} className={pastePanelOpen ? "open" : ""} />
         </button>
         {pastePanelOpen && <div className="paste-report-body"><label>Activation report<textarea className="textarea paste-report-textarea" rows={10} maxLength={50000} value={pasteReport} onChange={(event) => setPasteReport(event.target.value)} placeholder="Paste the contractor activation message here" /></label><div className="paste-report-actions"><span className="small muted">{pasteReport.length.toLocaleString()} / 50,000 characters</span><div className="toolbar"><button type="button" className="button" disabled={Boolean(extractingReport) || !pasteReport.trim()} onClick={() => void extractReport("gemini")}>{extractingReport === "gemini" ? "Checking..." : "Check with Gemini"}</button><button type="button" className="button primary" disabled={Boolean(extractingReport) || !pasteReport.trim()} onClick={() => void extractReport("local")}><ClipboardPaste size={15} />{extractingReport === "local" ? "Extracting..." : "Extract and fill"}</button></div></div>{extractionError && <div className="notice validation-notice inline" role="alert">{extractionError}</div>}</div>}
         {!pastePanelOpen && extractionSummary && <div className="paste-report-summary" role="status"><div><strong>{extractionSummary.source === "gemini" ? "Gemini check applied" : "Report extracted"}</strong><span className="small muted">{extractionSummary.filled} values filled, {extractionSummary.missing} expected values missing.</span></div><button type="button" className="button" onClick={() => setPastePanelOpen(true)}>Reopen</button>{extractionSummary.warnings.length > 0 && <ul>{extractionSummary.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}{extractionSummary.diagnostics.length > 0 && <div className="small muted paste-report-diagnostics">{extractionSummary.diagnostics.join(" ")}</div>}</div>}
       </section>}
       {initial && <section className="section ownership-grid" aria-label="Saved record metadata"><div><span className="small muted">Created by</span><strong>{record.createdBy}</strong></div><div><span className="small muted">Created</span><strong>{niceDateTime(record.createdAt)}</strong></div><div><span className="small muted">Updated by</span><strong>{record.updatedBy}</strong></div><div><span className="small muted">Last saved</span><strong>{niceDateTime(record.updatedAt)}</strong></div></section>}
-      <section id="site-details-section" className="section site-details-polish site-details-guided"><div className="section-title"><div><h2>Site details</h2><span className="small muted">Identity, ownership, and current installation state</span></div><div className="toolbar"><button type="button" className="button" disabled={saving || deleting || !record.id.trim() || !record.siteName.trim()} onClick={() => void copySiteDetailsLabel()} title="Copy ELRN school label"><ClipboardCopy size={15} />{siteDetailsCopyState === "copied" ? "Copied Site Label" : siteDetailsCopyState === "error" ? "Copy failed" : "Copy Site Label"}</button><button type="button" className="button" disabled={saving || deleting || !record.id.trim()} onClick={() => void copyRouterContactRow()} title="Copy School ID, site name, Ruijie serial, contact person, and contact number"><ClipboardCopy size={15} />{routerContactCopyState === "copied" ? "Copied Details" : routerContactCopyState === "error" ? "Copy failed" : "Copy Details"}</button></div></div><div className="grid-3">
+      <section id="site-details-section" className="section site-details-polish site-details-guided"><div className="section-title"><div><h2>Site details</h2><span className="small muted">Identity, ownership, and current installation state</span></div><div className="toolbar"><button type="button" className="button" disabled={saving || deleting || !record.id.trim() || !record.siteName.trim()} onClick={() => void copySiteDetailsLabel()} title="Copy ELRN school label"><ClipboardCopy size={15} />{siteDetailsCopyState === "copied" ? "Copied Site Label" : siteDetailsCopyState === "error" ? "Copy failed" : "Copy Site Label"}</button></div></div><div className="grid-3">
         <label className="school-lookup">Site name<input id="site-name-input" required className="field" role="combobox" aria-autocomplete="list" aria-expanded={schoolLookupOpen && schoolMatches.length > 0} aria-controls="school-directory-results" aria-invalid={Boolean((triedSubmit && missingSiteName) || duplicate) || undefined} aria-describedby={siteNameDescriptions} value={record.siteName} onFocus={() => setSchoolLookupOpen(true)} onBlur={() => window.setTimeout(() => setSchoolLookupOpen(false), 120)} onKeyDown={schoolLookupKeyDown} onChange={(e) => { patch({ siteName: e.target.value }); setSchoolLookupOpen(true); setSchoolLookupNotice(""); }} placeholder="Search or enter a school name" />{schoolLookupOpen && record.siteName.trim().length >= 2 && schoolMatches.length > 0 && <div className="school-lookup-results" id="school-directory-results" role="listbox">{schoolMatches.map((entry, index) => <button type="button" className={`school-lookup-option ${index === schoolLookupIndex ? "active" : ""}`} role="option" aria-selected={index === schoolLookupIndex} key={entry.id} onMouseDown={(event) => event.preventDefault()} onClick={() => selectDirectorySchool(entry)}><span className="school-lookup-name">{entry.schoolName}</span><span className="school-lookup-province">{entry.province || "Province unavailable"}</span></button>)}</div>}</label>
         <label>School ID<input id="school-id-input" required className="field" aria-invalid={Boolean((triedSubmit && !schoolId) || duplicateSchoolId) || undefined} aria-describedby={schoolIdDescriptions} value={record.id} onChange={(e) => patch({ id: e.target.value })} placeholder="School ID" /></label>
         <label>Solution<select id="solution-input" className="select" aria-invalid={Boolean(triedSubmit && missingUnitType) || undefined} aria-describedby={triedSubmit && missingUnitType ? "solution-required-error" : undefined} value={record.unitType} onChange={(e) => patch({ unitType: e.target.value })}>{activeOptions(refs.unitTypes, record.unitType).map((x) => <option key={x.id}>{x.name}</option>)}</select></label>
@@ -1922,9 +1926,9 @@ function equipmentFieldValue(component: Component | undefined, refs: ReferenceDa
 function installationExcelClipboardRow(record: Installation, refs: ReferenceData, part: "first" | "last") {
   const cleanCell = (value: unknown) => String(value ?? "").replace(/[\t\r\n]+/g, " ").trim();
   const starlink = record.components.find((component) => !component.removedAt && exportMatchKey(component.type).includes("starlink"));
-  const completeAddress = [record.barangay, record.municipality, record.province].map((part) => part.trim()).filter(Boolean).join(", ");
+  const completeAddress = record.contractorAddress.trim() || [record.barangay, record.municipality, record.province].map((part) => part.trim()).filter(Boolean).join(", ");
+  const contact = beneficiaryContactList(record).find(contactHasValue);
   const firstHalf = [
-    record.islandGroup,
     record.id,
     record.siteName,
     completeAddress,
@@ -1937,21 +1941,14 @@ function installationExcelClipboardRow(record: Installation, refs: ReferenceData
     record.installerTeamLead,
     record.contractor,
     record.region,
-  ];
-  return (part === "first" ? firstHalf : lastHalf).map(cleanCell).join("\t");
-}
-
-function installationRouterContactClipboardRow(record: Installation, refs: ReferenceData) {
-  const cleanCell = (value: unknown) => String(value ?? "").replace(/[\t\r\n]+/g, " ").trim();
-  const ruijieRouter = findRouterComponent(record.components);
-  const contact = beneficiaryContactList(record).find(contactHasValue);
-  return [
-    record.id,
-    record.siteName,
-    equipmentFieldValue(ruijieRouter, refs, "serial"),
+    record.installDate,
+    record.updatedBy,
+    "",
+    record.remarks,
     contact?.name ?? "",
     contact?.phone ?? "",
-  ].map(cleanCell).join("\t");
+  ];
+  return (part === "first" ? firstHalf : lastHalf).map(cleanCell).join("\t");
 }
 
 function xlsxInstallationRows(records: Installation[], refs: ReferenceData) {
