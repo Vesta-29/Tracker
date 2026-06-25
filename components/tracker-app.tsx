@@ -927,6 +927,10 @@ function InstallationForm({
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
+  const [excelCopyState, setExcelCopyState] = useState<"idle" | "first" | "last" | "error">("idle");
+  const [latLongCopyState, setLatLongCopyState] = useState<"idle" | "copied" | "error">("idle");
+  const [siteDetailsCopyState, setSiteDetailsCopyState] = useState<"idle" | "copied" | "error">("idle");
+  const [routerContactCopyState, setRouterContactCopyState] = useState<"idle" | "copied" | "error">("idle");
   const validationSummaryRef = useRef<HTMLDivElement>(null);
   useBlobUrlCleanup(record.photos);
 
@@ -1192,6 +1196,42 @@ function InstallationForm({
     }
   }
   function photos(e: ChangeEvent<HTMLInputElement>) { const files = Array.from(e.target.files ?? []).slice(0, 4); patch({ photos: [...record.photos, ...files.map((file) => ({ name: file.name, url: URL.createObjectURL(file) }))] }); }
+  async function copyForExcel(part: "first" | "last") {
+    try {
+      await navigator.clipboard.writeText(installationExcelClipboardRow(record, refs, part));
+      setExcelCopyState(part);
+      window.setTimeout(() => setExcelCopyState("idle"), 2400);
+    } catch {
+      setExcelCopyState("error");
+    }
+  }
+  async function copyLatLong() {
+    try {
+      await navigator.clipboard.writeText([record.latitude, record.longitude].map((value) => value.trim()).filter(Boolean).join(", "));
+      setLatLongCopyState("copied");
+      window.setTimeout(() => setLatLongCopyState("idle"), 2400);
+    } catch {
+      setLatLongCopyState("error");
+    }
+  }
+  async function copySiteDetailsLabel() {
+    try {
+      await navigator.clipboard.writeText(["ELRN", record.id.trim(), record.siteName.trim()].join("-"));
+      setSiteDetailsCopyState("copied");
+      window.setTimeout(() => setSiteDetailsCopyState("idle"), 2400);
+    } catch {
+      setSiteDetailsCopyState("error");
+    }
+  }
+  async function copyRouterContactRow() {
+    try {
+      await navigator.clipboard.writeText(installationRouterContactClipboardRow(record, refs));
+      setRouterContactCopyState("copied");
+      window.setTimeout(() => setRouterContactCopyState("idle"), 2400);
+    } catch {
+      setRouterContactCopyState("error");
+    }
+  }
   async function openAudit() {
     setTab("audit");
     if (auditLoaded || auditLoading || !record.dbId || !fetchAuditEvents) return;
@@ -1241,7 +1281,7 @@ function InstallationForm({
   }
 
   return <form onSubmit={submit} data-save-shortcut="site-form">
-    <div className="page-head site-record-head"><div><p className="eyebrow">{initial ? "Site record" : "New site"}</p><div className="site-record-heading-row"><h1>{initial ? initial.siteName || "Site name required" : "Add a site record"}</h1>{initial && <StatusPill status={record.status} refs={refs} />}</div>{initial && <div className="small muted record-id">School ID: {initial.id}</div>}<p className="muted site-record-description">{initial ? readOnly ? "Review site details, contractor visits, and change history." : "Update site details and deployed equipment." : "Review site details, contractor visits, and change history."}</p></div><div className="toolbar site-record-actions"><button type="button" className="button" disabled={saving || deleting} onClick={() => { if (isDirty) { setShowExitModal(true); } else { onCancel(); } }}>Back to sites</button>{initial && !readOnly && onDelete && <button type="button" className="button danger" disabled={saving || deleting} onClick={() => setShowDeleteModal(true)}><Trash2 size={15} />Delete site</button>}{!readOnly && <button className="button primary" disabled={!isDirty || saving || deleting}>{saving ? "Saving..." : initial ? "Save changes" : "Save site"}</button>}</div></div>
+    <div className="page-head site-record-head"><div><p className="eyebrow">{initial ? "Site record" : "New site"}</p><div className="site-record-heading-row"><h1>{initial ? initial.siteName || "Site name required" : "Add a site record"}</h1>{initial && <StatusPill status={record.status} refs={refs} />}</div>{initial && <div className="small muted record-id">School ID: {initial.id}</div>}<p className="muted site-record-description">{initial ? readOnly ? "Review site details, contractor visits, and change history." : "Update site details and deployed equipment." : "Review site details, contractor visits, and change history."}</p></div><div className="toolbar site-record-actions"><button type="button" className="button" disabled={saving || deleting} onClick={() => void copyForExcel("first")} title="Copy Island Group, Site Code, Site Name, and Site Complete Address"><ClipboardCopy size={15} />{excelCopyState === "first" ? "Copied first half" : excelCopyState === "error" ? "Copy failed" : "Copy first half"}</button><button type="button" className="button" disabled={saving || deleting} onClick={() => void copyForExcel("last")} title="Copy Starlink kit, coordinates, activation, endorser, contractor, and region"><ClipboardCopy size={15} />{excelCopyState === "last" ? "Copied last half" : "Copy last half"}</button><button type="button" className="button" disabled={saving || deleting} onClick={() => { if (isDirty) { setShowExitModal(true); } else { onCancel(); } }}>Back to sites</button>{initial && !readOnly && onDelete && <button type="button" className="button danger" disabled={saving || deleting} onClick={() => setShowDeleteModal(true)}><Trash2 size={15} />Delete site</button>}{!readOnly && <button className="button primary" disabled={!isDirty || saving || deleting}>{saving ? "Saving..." : initial ? "Save changes" : "Save site"}</button>}</div></div>
     <div className="tabs" role="tablist" aria-label="Site record sections" onKeyDown={handleTabKeyDown}><button type="button" id="site-tab-overview" role="tab" aria-controls="site-panel-overview" aria-selected={tab === "overview"} tabIndex={tab === "overview" ? 0 : -1} className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}>Overview</button><button type="button" id="site-tab-visits" role="tab" aria-controls="site-panel-visits" aria-selected={tab === "visits"} tabIndex={tab === "visits" ? 0 : -1} className={tab === "visits" ? "active" : ""} onClick={() => void openVisits()}>Service visits {visitsLoaded && <span>{serviceVisits.length}</span>}</button><button type="button" id="site-tab-audit" role="tab" aria-controls="site-panel-audit" aria-selected={tab === "audit"} tabIndex={tab === "audit" ? 0 : -1} className={tab === "audit" ? "active" : ""} onClick={() => void openAudit()}>Change log {auditLoaded && <span>{auditEvents.length}</span>}</button></div>
     {triedSubmit && hasValidationError && <div className="notice validation-notice inline" role="alert" tabIndex={-1} ref={validationSummaryRef}><strong>Check the highlighted site details before saving.</strong> Review the messages below and correct each required value.</div>}
     {tab === "overview" && <fieldset id="site-panel-overview" aria-labelledby="site-tab-overview" className="panel site-fields editing" role="tabpanel" disabled={readOnly}>
@@ -1254,7 +1294,7 @@ function InstallationForm({
         {!pastePanelOpen && extractionSummary && <div className="paste-report-summary" role="status"><div><strong>{extractionSummary.source === "gemini" ? "Gemini check applied" : "Report extracted"}</strong><span className="small muted">{extractionSummary.filled} values filled, {extractionSummary.missing} expected values missing.</span></div><button type="button" className="button" onClick={() => setPastePanelOpen(true)}>Reopen</button>{extractionSummary.warnings.length > 0 && <ul>{extractionSummary.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}{extractionSummary.diagnostics.length > 0 && <div className="small muted paste-report-diagnostics">{extractionSummary.diagnostics.join(" ")}</div>}</div>}
       </section>}
       {initial && <section className="section ownership-grid" aria-label="Saved record metadata"><div><span className="small muted">Created by</span><strong>{record.createdBy}</strong></div><div><span className="small muted">Created</span><strong>{niceDateTime(record.createdAt)}</strong></div><div><span className="small muted">Updated by</span><strong>{record.updatedBy}</strong></div><div><span className="small muted">Last saved</span><strong>{niceDateTime(record.updatedAt)}</strong></div></section>}
-      <section id="site-details-section" className="section site-details-polish site-details-guided"><div className="section-title"><div><h2>Site details</h2><span className="small muted">Identity, ownership, and current installation state</span></div></div><div className="grid-3">
+      <section id="site-details-section" className="section site-details-polish site-details-guided"><div className="section-title"><div><h2>Site details</h2><span className="small muted">Identity, ownership, and current installation state</span></div><div className="toolbar"><button type="button" className="button" disabled={saving || deleting || !record.id.trim() || !record.siteName.trim()} onClick={() => void copySiteDetailsLabel()} title="Copy ELRN school label"><ClipboardCopy size={15} />{siteDetailsCopyState === "copied" ? "Copied Site Label" : siteDetailsCopyState === "error" ? "Copy failed" : "Copy Site Label"}</button><button type="button" className="button" disabled={saving || deleting || !record.id.trim()} onClick={() => void copyRouterContactRow()} title="Copy School ID, site name, Ruijie serial, contact person, and contact number"><ClipboardCopy size={15} />{routerContactCopyState === "copied" ? "Copied router contact" : routerContactCopyState === "error" ? "Copy failed" : "Copy router contact"}</button></div></div><div className="grid-3">
         <label className="school-lookup">Site name<input required className="field" role="combobox" aria-autocomplete="list" aria-expanded={schoolLookupOpen && schoolMatches.length > 0} aria-controls="school-directory-results" value={record.siteName} onFocus={() => setSchoolLookupOpen(true)} onBlur={() => window.setTimeout(() => setSchoolLookupOpen(false), 120)} onKeyDown={schoolLookupKeyDown} onChange={(e) => { patch({ siteName: e.target.value }); setSchoolLookupOpen(true); setSchoolLookupNotice(""); }} placeholder="Search or enter a school name" />{schoolLookupOpen && record.siteName.trim().length >= 2 && schoolMatches.length > 0 && <div className="school-lookup-results" id="school-directory-results" role="listbox">{schoolMatches.map((entry, index) => <button type="button" className={`school-lookup-option ${index === schoolLookupIndex ? "active" : ""}`} role="option" aria-selected={index === schoolLookupIndex} key={entry.id} onMouseDown={(event) => event.preventDefault()} onClick={() => selectDirectorySchool(entry)}><span className="school-lookup-name">{entry.schoolName}</span><span className="school-lookup-province">{entry.province || "Province unavailable"}</span></button>)}</div>}</label>
         <label>School ID<input required className="field" value={record.id} onChange={(e) => patch({ id: e.target.value })} placeholder="School ID" /></label>
         <label>Solution<select className="select" value={record.unitType} onChange={(e) => patch({ unitType: e.target.value })}>{activeOptions(refs.unitTypes, record.unitType).map((x) => <option key={x.id}>{x.name}</option>)}</select></label>
@@ -1264,14 +1304,14 @@ function InstallationForm({
         <label>Activation date<input className="field" type="date" value={record.activationDate ?? ""} placeholder={today()} onChange={(e) => patch({ activationDate: e.target.value || undefined })} /></label>
         <label>Status<select className="select" value={record.status} onChange={(e) => patch({ status: e.target.value as Status })}>{siteStatusOptions(refs, record.status).map((status) => <option value={status.value} key={status.value}>{status.name}</option>)}</select></label>
       </div>{schoolLookupNotice && <div className="small muted school-lookup-notice" role="status">{schoolLookupNotice}</div>}{triedSubmit && !schoolId && <div className="notice validation-notice inline" role="alert"><strong>School ID is required.</strong> Enter the official school identifier before saving.</div>}{duplicateSchoolId && <div className="notice validation-notice inline" role="alert"><strong>This School ID already exists.</strong> Enter a unique School ID before saving.</div>}{duplicate && <div className="notice validation-notice inline" role="alert"><strong>This site name already exists.</strong> Enter a unique site name before saving.</div>}{record.legacyKitNumber && <div className="notice inline legacy-kit-prompt"><span className="small migration-label">Migration follow-up</span><strong>Assign old kit number: {record.legacyKitNumber}</strong><div className="small">Add the correct equipment, enter this value in its kit-number field, then mark this follow-up as assigned.</div><button type="button" className="button" onClick={() => patch({ legacyKitNumber: undefined })}>Mark kit number assigned</button></div>}</section>
-      <section className="section"><div className="section-title"><h2>Site location</h2><span className="small muted">PSGC-aligned fields</span></div><div className="grid-4">
+      <section className="section"><div className="section-title"><div><h2>Site location</h2><span className="small muted">PSGC-aligned fields</span></div><button type="button" className="button" disabled={saving || deleting || (!record.latitude.trim() && !record.longitude.trim())} onClick={() => void copyLatLong()} title="Copy latitude and longitude"><ClipboardCopy size={15} />{latLongCopyState === "copied" ? "Copied Coordinates" : latLongCopyState === "error" ? "Copy failed" : "Copy Coordinates"}</button></div><div className="grid-4">
         <LocationCombobox label="Island group" placeholder="Search island group" value={record.islandGroup} options={islandGroups.map((group) => ({ code: group, name: group }))} onSelect={(selected) => patch({ islandGroup: selected.code as Installation["islandGroup"], region: "", regionCode: "", province: "", provinceCode: "", municipality: "", municipalityCode: "", barangay: "", barangayCode: "" })} />
         <LocationCombobox label="Region" placeholder="Search region" value={record.regionCode} options={regions} loading={regionChoices.loading} disabled={!record.islandGroup} onSelect={(selected) => patch({ region: selected.name, regionCode: selected.code, province: "", provinceCode: "", municipality: "", municipalityCode: "", barangay: "", barangayCode: "" })} />
         <LocationCombobox label="Province" placeholder="Search province" value={record.provinceCode} options={provinceChoices.options} loading={provinceChoices.loading} disabled={!record.regionCode} onSelect={(selected) => patch({ province: selected.name, provinceCode: selected.code, municipality: "", municipalityCode: "", barangay: "", barangayCode: "" })} />
         <LocationCombobox label="Locality" placeholder="Search locality" value={record.municipalityCode} options={municipalityChoices.options} loading={municipalityChoices.loading} disabled={!record.provinceCode} onSelect={(selected) => patch({ municipality: selected.name, municipalityCode: selected.code, barangay: "", barangayCode: "" })} />
         <LocationCombobox label="Barangay" placeholder="Search barangay" value={record.barangayCode} options={barangayChoices.options} loading={barangayChoices.loading} disabled={!record.municipalityCode} clearLabel="No barangay" onClear={() => patch({ barangay: "", barangayCode: "" })} onSelect={(selected) => patch({ barangay: selected.name, barangayCode: selected.code })} />
-        <label>Longitude<input className="field" value={record.longitude} onChange={(e) => patch({ longitude: e.target.value })} placeholder="121.0000" /></label>
         <label>Latitude<input className="field" value={record.latitude} onChange={(e) => patch({ latitude: e.target.value })} placeholder="14.0000" /></label>
+        <label>Longitude<input className="field" value={record.longitude} onChange={(e) => patch({ longitude: e.target.value })} placeholder="121.0000" /></label>
       </div>{locationError && <div className="notice validation-notice inline" role="alert"><strong>Unable to load location options.</strong> {locationError}</div>}{triedSubmit && missingLocation && <div className="notice validation-notice inline" role="alert"><strong>Complete the site location.</strong> Select an island group, region, province, and locality.</div>}</section>
       {requiredCustomFields.length > 0 && <section className="section"><div className="section-title"><div><h2>Required additional information</h2><span className="small muted">Configured by your workplace administrator.</span></div></div><div className="grid-3">{requiredCustomFields.map((field) => <CustomFieldInput field={field} value={(record.customValues ?? {})[field.id] ?? ""} onChange={(value) => patch({ customValues: { ...(record.customValues ?? {}), [field.id]: value } })} key={field.id} />)}</div></section>}
       {optionalCustomFields.length > 0 && <section className="section collapsible-section"><button type="button" className="button disclosure-button" aria-expanded={showOptionalFields} onClick={() => setShowOptionalFields((show) => !show)}><span><strong>Optional additional information</strong><small>{optionalValueCount ? `${optionalValueCount} of ${optionalFieldCount} filled` : `${optionalFieldCount} optional ${optionalFieldCount === 1 ? "field" : "fields"}`}</small></span><ChevronDown size={15} /></button>{showOptionalFields && <div className="grid-3 collapsible-section-body">{optionalCustomFields.map((field) => <CustomFieldInput field={field} value={(record.customValues ?? {})[field.id] ?? ""} onChange={(value) => patch({ customValues: { ...(record.customValues ?? {}), [field.id]: value } })} key={field.id} />)}</div>}</section>}
@@ -1805,6 +1845,45 @@ function equipmentFieldValue(component: Component | undefined, refs: ReferenceDa
   if (!component) return "";
   const field = visibleComponentFields(refs, component).find((attachment) => { const reusable = libraryField(refs, attachment); return reusable && exportMatchKey(reusable.label).includes(fieldName); });
   return field ? component.values?.[field.id]?.trim() || "" : "";
+}
+
+function installationExcelClipboardRow(record: Installation, refs: ReferenceData, part: "first" | "last") {
+  const cleanCell = (value: unknown) => String(value ?? "").replace(/[\t\r\n]+/g, " ").trim();
+  const starlink = record.components.find((component) => !component.removedAt && exportMatchKey(component.type).includes("starlink"));
+  const completeAddress = [record.barangay, record.municipality, record.province].map((part) => part.trim()).filter(Boolean).join(", ");
+  const firstHalf = [
+    record.islandGroup,
+    record.id,
+    record.siteName,
+    completeAddress,
+  ];
+  const lastHalf = [
+    equipmentFieldValue(starlink, refs, "kit"),
+    record.latitude,
+    record.longitude,
+    record.activationDate ?? "",
+    record.installerTeamLead,
+    record.contractor,
+    record.region,
+  ];
+  return (part === "first" ? firstHalf : lastHalf).map(cleanCell).join("\t");
+}
+
+function installationRouterContactClipboardRow(record: Installation, refs: ReferenceData) {
+  const cleanCell = (value: unknown) => String(value ?? "").replace(/[\t\r\n]+/g, " ").trim();
+  const ruijieRouter = record.components.find((component) => {
+    if (component.removedAt) return false;
+    const type = exportMatchKey(component.type);
+    return type.includes("ruijie") && type.includes("router");
+  });
+  const contact = beneficiaryContactList(record).find(contactHasValue);
+  return [
+    record.id,
+    record.siteName,
+    equipmentFieldValue(ruijieRouter, refs, "serial"),
+    contact?.name ?? "",
+    contact?.phone ?? "",
+  ].map(cleanCell).join("\t");
 }
 
 function xlsxInstallationRows(records: Installation[], refs: ReferenceData) {
