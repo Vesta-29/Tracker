@@ -995,17 +995,14 @@ function InstallationForm({
       if (resolution.location) { selected = { ...entry, ...resolution.location, warning: "" }; resolutionIssue = ""; }
       else resolutionIssue = resolution.issue || entry.warning;
     }
-    const next: Partial<Installation> = {};
-    if (!initial?.siteName && !original.siteName) next.siteName = selected.schoolName;
-    if (!record.id.trim() && selected.schoolId) next.id = selected.schoolId;
+    const next: Partial<Installation> = { siteName: selected.schoolName };
+    if (selected.schoolId) next.id = selected.schoolId;
     const resolved = Boolean(selected.regionCode && selected.provinceCode && selected.municipalityCode);
-    const compatible = resolved && [[record.regionCode, selected.regionCode], [record.provinceCode, selected.provinceCode], [record.municipalityCode, selected.municipalityCode], [record.barangayCode, selected.barangayCode]].every(([current, incoming]) => !current || !incoming || current === incoming);
-    if (compatible) {
+    if (resolved) {
       const locationFields = ["islandGroup", "region", "regionCode", "province", "provinceCode", "municipality", "municipalityCode", "barangay", "barangayCode"] as const;
-      for (const field of locationFields) if (!record[field] && selected[field]) (next as Record<string, unknown>)[field] = selected[field];
-      setSchoolLookupNotice("School directory data filled available blank fields.");
+      for (const field of locationFields) (next as Record<string, unknown>)[field] = selected[field] ?? "";
+      setSchoolLookupNotice("School selected. School ID, site name, and location were updated.");
     } else if (!resolved) setSchoolLookupNotice(`School selected, but its spreadsheet location could not be matched to PSGC data.${resolutionIssue ? ` ${resolutionIssue}` : ""}`);
-    else setSchoolLookupNotice("School selected. Existing location values were preserved because they differ from the directory.");
     patch(next);
     setSchoolLookupOpen(false);
     setSchoolMatches([]);
