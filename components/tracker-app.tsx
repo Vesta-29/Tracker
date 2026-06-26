@@ -73,7 +73,8 @@ function componentDraft(typeName: string, order = 0): Component { return { id: `
 function defaultNewSiteComponents(refs: ReferenceData) { return orderedByDisplay(refs.componentTypes).filter((type) => type.active && type.defaultOnNewSite).map((type, index) => componentDraft(type.name, index)); }
 type ExtractionEquipmentSlot = "starlink" | "indoor1" | "indoor2" | "outdoor" | "router";
 type AutoEquipmentValue = { componentId: string; fieldId: string; value: string; generated: boolean };
-type ExtractionSummary = { filled: number; missing: number; warnings: string[]; diagnostics: string[]; source: "local" | "gemini" };
+type ExtractionReviewItem = { key: string; label: string; value: string; target: string };
+type ExtractionSummary = { filled: number; missing: number; warnings: string[]; diagnostics: string[]; source: "local" | "gemini"; applied: ExtractionReviewItem[] };
 const equipmentSlotValues: Record<ExtractionEquipmentSlot, keyof SiteReportValues> = { starlink: "starlinkKitNumber", indoor1: "ap1IndoorSerial", indoor2: "ap2IndoorSerial", outdoor: "ap3OutdoorSerial", router: "ruijieRouterSerial" };
 function extractionTypeMatch(slot: ExtractionEquipmentSlot, name: string) {
   const value = name.toLowerCase();
@@ -192,6 +193,56 @@ function useEscape(onEscape: () => void, active = true) {
     return () => window.removeEventListener("keydown", keydown);
   }, [active, onEscape]);
 }
+function focusableModalElements(root: HTMLElement) {
+  return Array.from(root.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')).filter((element) => !element.hasAttribute("hidden") && element.offsetParent !== null);
+}
+function useModalAccessibility() {
+  useEffect(() => {
+    let currentPanel: HTMLElement | undefined;
+    let previousFocus: HTMLElement | undefined;
+    function activePanel() {
+      const panels = Array.from(document.querySelectorAll<HTMLElement>("[aria-modal='true']"));
+      return panels[panels.length - 1];
+    }
+    function activatePanel() {
+      const panel = activePanel();
+      if (!panel || panel === currentPanel) return;
+      previousFocus = document.activeElement instanceof HTMLElement && !document.activeElement.closest("[aria-modal='true']") ? document.activeElement : previousFocus;
+      currentPanel = panel;
+      if (!panel.hasAttribute("tabindex")) panel.setAttribute("tabindex", "-1");
+      const focusTarget = panel.querySelector<HTMLElement>("[autofocus]") ?? focusableModalElements(panel)[0] ?? panel;
+      window.setTimeout(() => focusTarget.focus({ preventScroll: true }), 0);
+    }
+    function keydown(event: KeyboardEvent) {
+      const panel = activePanel();
+      if (!panel) return;
+      if (currentPanel && currentPanel !== panel) currentPanel = panel;
+      if (event.key !== "Tab") return;
+      const focusable = focusableModalElements(panel);
+      if (!focusable.length) { event.preventDefault(); panel.focus({ preventScroll: true }); return; }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    }
+    const observer = new MutationObserver(() => {
+      const panel = activePanel();
+      if (panel) activatePanel();
+      else if (currentPanel) {
+        currentPanel = undefined;
+        previousFocus?.focus({ preventScroll: true });
+        previousFocus = undefined;
+      }
+    });
+    document.addEventListener("keydown", keydown, true);
+    observer.observe(document.body, { childList: true, subtree: true });
+    activatePanel();
+    return () => {
+      document.removeEventListener("keydown", keydown, true);
+      observer.disconnect();
+    };
+  }, []);
+}
 function activeOptions(options: ReferenceOption[], selected?: string) { return options.filter((option) => option.active || option.name === selected); }
 function normalizeMac(value: string) { const compact = value.replace(/[:-]/g, "").trim().toUpperCase(); return /^[0-9A-F]{12}$/.test(compact) ? compact.match(/.{2}/g)!.join(":") : ""; }
 function validInteger(value: string) { return /^-?\d+$/.test(value.trim()); }
@@ -248,6 +299,7 @@ function auditValue(value: unknown) { if (value === null || value === undefined 
 function errorMessage(error: unknown, fallback: string) { return error instanceof Error ? error.message : typeof error === "object" && error !== null && "message" in error ? String(error.message) : fallback; }
 
 export default function TrackerApp() {
+  useModalAccessibility();
   const router = useRouter();
   const navigate = useGuardedNavigation();
   const pathname = usePathname();
@@ -1014,6 +1066,11 @@ function InstallationForm({
   async function applyReportExtraction(extraction: SiteReportExtraction, source: "local" | "gemini") {
     const values = extraction.values;
     const warnings: string[] = [];
+    const applied = new Map<string, ExtractionReviewItem>();
+    const addApplied = (key: string, label: string, value: unknown, target: string) => {
+      const text = typeof value === "string" ? value.trim() : String(value ?? "").trim();
+      if (text) applied.set(key, { key, label, value: text, target });
+    };
     let filled = 0;
     let directory: SchoolDirectoryEntry | null = null;
     try { directory = await findSchoolDirectoryEntry({ schoolId: values.schoolId, schoolName: values.siteName }); }
@@ -1044,7 +1101,7 @@ function InstallationForm({
     const highlighted = new Set<string>();
     setRecord((current) => {
       const next: Installation = { ...current, components: current.components.map((component) => ({ ...component, values: { ...(component.values ?? {}) } })), beneficiaryContacts: beneficiaryContactList(current).map((contact) => ({ ...contact })) };
-      const applyScalar = (field: keyof Installation, incoming: unknown) => {
+      const applyScalar = (field: keyof Installation, incoming: unknown, review?: { label: string; target: string }) => {
         const value = typeof incoming === "string" ? incoming.trim() : incoming;
         if (!value) return;
         const currentValue = current[field];
@@ -1055,20 +1112,34 @@ function InstallationForm({
         (next as unknown as Record<string, unknown>)[field] = value;
         autoScalarValues.current[String(field)] = String(value);
         highlighted.add(String(field));
+        if (review) addApplied(String(field), review.label, value, review.target);
       };
 
-      applyScalar("id", directory?.schoolId || values.schoolId);
-      applyScalar("siteName", directory?.schoolName || values.siteName);
-      applyScalar("installerTeamLead", values.installerTeamLead);
-      applyScalar("installDate", values.installDate);
-      applyScalar("activationDate", values.activationDate || values.installDate);
-      applyScalar("contractorAddress", values.address);
-      applyScalar("longitude", values.longitude);
-      applyScalar("latitude", values.latitude);
-      applyScalar("remarks", values.remarks);
-      if (contractor) applyScalar("contractor", contractor.name);
-      if (solution) applyScalar("unitType", solution.name);
-      if (resolvedLocation) for (const field of ["islandGroup", "region", "regionCode", "province", "provinceCode", "municipality", "municipalityCode", "barangay", "barangayCode"] as const) applyScalar(field, resolvedLocation[field]);
+      applyScalar("id", directory?.schoolId || values.schoolId, { label: "School ID", target: "school-id-input" });
+      applyScalar("siteName", directory?.schoolName || values.siteName, { label: "Site name", target: "site-name-input" });
+      applyScalar("installerTeamLead", values.installerTeamLead, { label: "Installer / Team lead", target: "installer-team-lead-input" });
+      applyScalar("installDate", values.installDate, { label: "Installation date", target: "install-date-input" });
+      applyScalar("activationDate", values.activationDate || values.installDate, { label: "Activation date", target: "activation-date-input" });
+      applyScalar("contractorAddress", values.address, { label: "Contractor-provided address", target: "contractor-address-input" });
+      applyScalar("longitude", values.longitude, { label: "Longitude", target: "longitude-input" });
+      applyScalar("latitude", values.latitude, { label: "Latitude", target: "latitude-input" });
+      applyScalar("remarks", values.remarks, { label: "Remarks", target: "remarks-input" });
+      if (contractor) applyScalar("contractor", contractor.name, { label: "Contractor", target: "contractor-input" });
+      if (solution) applyScalar("unitType", solution.name, { label: "Solution", target: "solution-input" });
+      if (resolvedLocation) {
+        const locationFields = [
+          ["islandGroup", "Island group", "island-group-input"],
+          ["region", "Region", "region-input"],
+          ["regionCode"],
+          ["province", "Province", "province-input"],
+          ["provinceCode"],
+          ["municipality", "Locality", "locality-input"],
+          ["municipalityCode"],
+          ["barangay", "Barangay", "barangay-input"],
+          ["barangayCode"],
+        ] as const;
+        for (const [field, label, target] of locationFields) applyScalar(field, resolvedLocation[field], label && target ? { label, target } : undefined);
+      }
 
       const usedComponents = new Set<string>();
       for (const slot of Object.keys(equipmentSlotValues) as ExtractionEquipmentSlot[]) {
@@ -1111,6 +1182,7 @@ function InstallationForm({
         usedComponents.add(component.id);
         autoEquipmentValues.current[slot] = { componentId: component.id, fieldId: field.id, value: incoming, generated };
         highlighted.add(`equipment:${component.id}:${field.id}`);
+        addApplied(`equipment:${component.id}:${field.id}`, `${type.name} ${libraryField(refs, field)?.label ?? "value"}`, incoming, componentFieldInputId(component.id, field.id));
         filled += 1;
       }
 
@@ -1130,15 +1202,21 @@ function InstallationForm({
         if (!contact) { contact = contactDraft(); next.beneficiaryContacts.push(contact); generated = true; }
         Object.assign(contact, contactIncoming);
         autoContactValue.current = { id: contact.id, ...contactIncoming, generated };
-        if (contactIncoming.name) highlighted.add(`beneficiary:${contact.id}:name`);
-        if (contactIncoming.phone) highlighted.add(`beneficiary:${contact.id}:phone`);
+        if (contactIncoming.name) {
+          highlighted.add(`beneficiary:${contact.id}:name`);
+          addApplied(`beneficiary:${contact.id}:name`, "Beneficiary name", contactIncoming.name, `beneficiary-${contact.id}-name`);
+        }
+        if (contactIncoming.phone) {
+          highlighted.add(`beneficiary:${contact.id}:phone`);
+          addApplied(`beneficiary:${contact.id}:phone`, "Beneficiary phone", contactIncoming.phone, `beneficiary-${contact.id}-phone`);
+        }
         filled += Object.values(contactIncoming).filter(Boolean).length;
       }
       return next;
     });
     setExtractionHighlights([...highlighted]);
     window.setTimeout(() => setExtractionHighlights((current) => current.some((key) => highlighted.has(key)) ? [] : current), 5000);
-    window.setTimeout(() => setExtractionSummary({ filled, missing: extraction.missing.length, warnings: [...new Set(warnings)], diagnostics: extraction.diagnostics, source }), 0);
+    window.setTimeout(() => setExtractionSummary({ filled, missing: extraction.missing.length, warnings: [...new Set(warnings)], diagnostics: extraction.diagnostics, source, applied: [...applied.values()] }), 0);
     setPastePanelOpen(false);
     if (values.remarks) setShowNotesPhotos(true);
     setSchoolLookupNotice(directory ? "Matched the school directory and applied its canonical school and PSGC location data." : "Report values were extracted. Review the highlighted summary before saving.");
@@ -1251,6 +1329,14 @@ function InstallationForm({
     const target = document.getElementById(id);
     target?.scrollIntoView({ behavior: "smooth", block: "center" });
     if (target instanceof HTMLElement) target.focus({ preventScroll: true });
+  }
+  function focusExtractionTarget(id: string) {
+    if (id === "remarks-input") setShowNotesPhotos(true);
+    requestAnimationFrame(() => {
+      const target = document.getElementById(id);
+      target?.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (target instanceof HTMLElement) target.focus({ preventScroll: true });
+    });
   }
   function savedRecord() { return syncedBeneficiaryFields({ ...record, components: record.components.map((component) => ({ ...component, values: Object.fromEntries(Object.entries(component.values ?? {}).map(([id, value]) => { const attachment = visibleComponentFields(refs, component).find((field) => field.id === id); return [id, attachment && libraryField(refs, attachment)?.type === "mac" && value ? normalizeMac(value) : value]; })) })), updatedBy: actorName, updatedAt: new Date().toISOString() }); }
   async function persistRecord() {
@@ -1390,9 +1476,15 @@ function InstallationForm({
       setDeleting(false);
     }
   }
+  const excelSiteCopyLabel = excelCopyState === "first" ? "Copied Excel site details" : excelCopyState === "error" ? "Excel copy failed" : "Excel site details";
+  const excelActivationCopyLabel = excelCopyState === "last" ? "Copied Excel activation columns" : excelCopyState === "error" ? "Excel copy failed" : "Excel activation columns";
+  const starlinkCopyLabel = siteDetailsCopyState === "starlink" ? "Copied Starlink label" : siteDetailsCopyState === "error" ? "Label copy failed" : "Starlink label";
+  const projectCopyLabel = siteDetailsCopyState === "project" ? "Copied project name" : siteDetailsCopyState === "error" ? "Label copy failed" : "Project name";
+  const coordinateCopyLabel = latLongCopyState === "copied" ? "Copied latitude, longitude" : latLongCopyState === "error" ? "Coordinate copy failed" : "Latitude, longitude";
+  const plusCodeCopyLabel = plusCodeCopyState === "copied" ? "Copied Plus Code" : plusCodeCopyState === "error" ? "Plus Code copy failed" : "Plus Code";
 
   return <form onSubmit={submit} data-save-shortcut="site-form" noValidate>
-    <div className="page-head site-record-head"><div><p className="eyebrow">{initial ? "Site record" : "New site"}</p><div className="site-record-heading-row"><h1>{initial ? initial.siteName || "Site name required" : "Add a site record"}</h1>{initial && <StatusPill status={record.status} refs={refs} />}</div>{initial && <div className="small muted record-id">School ID: {initial.id}</div>}<p className="muted site-record-description">{initial ? readOnly ? "Review site details, contractor visits, and change history." : "Update site details and deployed equipment." : "Review site details, contractor visits, and change history."}</p></div><div className="site-record-actions"><div className="site-record-main-actions"><button type="button" className="button" disabled={saving || deleting} onClick={() => { if (isDirty) { setShowExitModal(true); } else { onCancel(); } }}>Back to sites</button>{initial && !readOnly && onDelete && <button type="button" className="button danger" disabled={saving || deleting} onClick={() => setShowDeleteModal(true)}><Trash2 size={15} />Delete site</button>}{!readOnly && <button className="button primary" disabled={!isDirty || saving || deleting}>{saving ? "Saving..." : initial ? "Save changes" : "Save site"}</button>}</div><div className="site-record-copy-actions" aria-label="Copy Excel values"><button type="button" className="button ghost site-record-copy-button" disabled={saving || deleting} onClick={() => void copyForExcel("first")} title="Copy BEIS School ID, Site Name, and Site Complete Address"><ClipboardCopy size={14} />{excelCopyState === "first" ? "Copied site details" : excelCopyState === "error" ? "Copy failed" : "Copy site details"}</button><button type="button" className="button ghost site-record-copy-button" disabled={saving || deleting} onClick={() => void copyForExcel("last")} title="Copy Starlink activation columns"><ClipboardCopy size={14} />{excelCopyState === "last" ? "Copied activation columns" : "Copy activation columns"}</button></div></div></div>
+    <div className="page-head site-record-head"><div><p className="eyebrow">{initial ? "Site record" : "New site"}</p><div className="site-record-heading-row"><h1>{initial ? initial.siteName || "Site name required" : "Add a site record"}</h1>{initial && <StatusPill status={record.status} refs={refs} />}</div>{initial && <div className="small muted record-id">School ID: {initial.id}</div>}<p className="muted site-record-description">{initial ? readOnly ? "Review site details, contractor visits, and change history." : "Update site details and deployed equipment." : "Review site details, contractor visits, and change history."}</p></div><div className="site-record-actions"><div className="site-record-main-actions"><button type="button" className="button" disabled={saving || deleting} onClick={() => { if (isDirty) { setShowExitModal(true); } else { onCancel(); } }}>Back to sites</button>{initial && !readOnly && onDelete && <button type="button" className="button danger" disabled={saving || deleting} onClick={() => setShowDeleteModal(true)}><Trash2 size={15} />Delete site</button>}{!readOnly && <button className="button primary" disabled={!isDirty || saving || deleting}>{saving ? "Saving..." : initial ? "Save changes" : "Save site"}</button>}</div><div className="site-record-copy-group" aria-label="Copy values for Excel"><span>Excel copies</span><div className="site-record-copy-actions"><button type="button" className="button ghost site-record-copy-button" disabled={saving || deleting} onClick={() => void copyForExcel("first")} title="Copy BEIS School ID, Site Name, and Site Complete Address"><ClipboardCopy size={14} />{excelSiteCopyLabel}</button><button type="button" className="button ghost site-record-copy-button" disabled={saving || deleting} onClick={() => void copyForExcel("last")} title="Copy Starlink activation columns"><ClipboardCopy size={14} />{excelActivationCopyLabel}</button></div></div></div></div>
     <div className="tabs" role="tablist" aria-label="Site record sections" onKeyDown={handleTabKeyDown}><button type="button" id="site-tab-overview" role="tab" aria-controls="site-panel-overview" aria-selected={tab === "overview"} tabIndex={tab === "overview" ? 0 : -1} className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}>Overview</button><button type="button" id="site-tab-visits" role="tab" aria-controls="site-panel-visits" aria-selected={tab === "visits"} tabIndex={tab === "visits" ? 0 : -1} className={tab === "visits" ? "active" : ""} onClick={() => void openVisits()}>Service visits {visitsLoaded && <span>{serviceVisits.length}</span>}</button><button type="button" id="site-tab-audit" role="tab" aria-controls="site-panel-audit" aria-selected={tab === "audit"} tabIndex={tab === "audit" ? 0 : -1} className={tab === "audit" ? "active" : ""} onClick={() => void openAudit()}>Change log {auditLoaded && <span>{auditEvents.length}</span>}</button></div>
     {triedSubmit && hasValidationError && <div className="notice validation-notice validation-summary inline" role="alert" tabIndex={-1} ref={validationSummaryRef}><strong>Check the highlighted site details before saving.</strong><ul>{validationItems.map((item) => <li key={item.id}><a href={`#${item.target}`} onClick={(event) => { event.preventDefault(); focusValidationTarget(item.target); }}>{item.text}</a></li>)}</ul></div>}
     {tab === "overview" && <div className="site-workflow-bar" aria-label="Overview workflow">
@@ -1406,28 +1498,28 @@ function InstallationForm({
           <span className="paste-report-icon"><ClipboardPaste size={18} /></span><span><strong id="paste-report-title">Paste activation report</strong><small>{extractionSummary ? `${extractionSummary.filled} values filled Â· ${extractionSummary.missing} missing Â· ${extractionSummary.warnings.length} warnings` : "Extract school, location, equipment, and contact details"}</small></span><ChevronDown size={17} className={pastePanelOpen ? "open" : ""} />
         </button>
         {pastePanelOpen && <div className="paste-report-body"><label>Activation report<textarea className="textarea paste-report-textarea" rows={10} maxLength={50000} value={pasteReport} onChange={(event) => setPasteReport(event.target.value)} placeholder="Paste the contractor activation message here" /></label><div className="paste-report-actions"><span className="small muted">{pasteReport.length.toLocaleString()} / 50,000 characters</span><div className="toolbar"><button type="button" className="button" disabled={Boolean(extractingReport) || !pasteReport.trim()} onClick={() => void extractReport("gemini")}>{extractingReport === "gemini" ? "Checking..." : "Check with Gemini"}</button><button type="button" className="button primary" disabled={Boolean(extractingReport) || !pasteReport.trim()} onClick={() => void extractReport("local")}><ClipboardPaste size={15} />{extractingReport === "local" ? "Extracting..." : "Extract and fill"}</button></div></div>{extractionError && <div className="notice validation-notice inline" role="alert">{extractionError}</div>}</div>}
-        {!pastePanelOpen && extractionSummary && <div className="paste-report-summary" role="status"><div><strong>{extractionSummary.source === "gemini" ? "Gemini check applied" : "Report extracted"}</strong><span className="small muted">{extractionSummary.filled} values filled, {extractionSummary.missing} expected values missing.</span></div><button type="button" className="button" onClick={() => setPastePanelOpen(true)}>Reopen</button>{extractionSummary.warnings.length > 0 && <ul>{extractionSummary.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}{extractionSummary.diagnostics.length > 0 && <div className="small muted paste-report-diagnostics">{extractionSummary.diagnostics.join(" ")}</div>}</div>}
+        {!pastePanelOpen && extractionSummary && <div className="paste-report-summary" role="status" aria-live="polite"><div><strong>{extractionSummary.source === "gemini" ? "Gemini check applied" : "Report extracted"}</strong><span className="small muted">{extractionSummary.filled} values filled, {extractionSummary.missing} expected values missing.</span></div><button type="button" className="button" onClick={() => setPastePanelOpen(true)}>Reopen</button>{extractionSummary.applied.length > 0 && <div className="extraction-review" aria-label="Fields filled from activation report"><div className="extraction-review-head"><ClipboardList size={15} /><strong>Review report-filled fields before saving</strong></div><div className="extraction-review-list">{extractionSummary.applied.map((item) => <button type="button" className="extraction-review-item" key={item.key} onClick={() => focusExtractionTarget(item.target)}><span>{item.label}</span><strong>{item.value}</strong></button>)}</div></div>}{extractionSummary.warnings.length > 0 && <ul>{extractionSummary.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}{extractionSummary.diagnostics.length > 0 && <div className="small muted paste-report-diagnostics">{extractionSummary.diagnostics.join(" ")}</div>}</div>}
       </section>}
       {initial && <section className="section ownership-grid" aria-label="Saved record metadata"><div><span className="small muted">Created by</span><strong>{record.createdBy}</strong></div><div><span className="small muted">Created</span><strong>{niceDateTime(record.createdAt)}</strong></div><div><span className="small muted">Updated by</span><strong>{record.updatedBy}</strong></div><div><span className="small muted">Last saved</span><strong>{niceDateTime(record.updatedAt)}</strong></div></section>}
-      <section id="site-details-section" className="section site-details-polish site-details-guided"><div className="section-title"><div><h2>Site details</h2><span className="small muted">Identity, ownership, and current installation state</span></div><div className="toolbar"><button type="button" className="button" disabled={saving || deleting || !record.id.trim() || !record.siteName.trim()} onClick={() => void copyStarlinkLabel()} title="Copy ELRN Starlink label"><ClipboardCopy size={15} />{siteDetailsCopyState === "starlink" ? "Copied Starlink Label" : siteDetailsCopyState === "error" ? "Copy failed" : "Copy Starlink Label"}</button><button type="button" className="button" disabled={saving || deleting || !record.id.trim() || !record.siteName.trim()} onClick={() => void copyProjectName()} title="Copy ELRN project name"><ClipboardCopy size={15} />{siteDetailsCopyState === "project" ? "Copied Project Name" : siteDetailsCopyState === "error" ? "Copy failed" : "Copy Project Name"}</button></div></div><div className="grid-3">
+      <section id="site-details-section" className="section site-details-polish site-details-guided"><div className="section-title"><div><h2>Site details</h2><span className="small muted">Identity, ownership, and current installation state</span></div><div className="toolbar section-copy-actions" aria-label="Copy site labels"><span>Labels</span><button type="button" className="button" disabled={saving || deleting || !record.id.trim() || !record.siteName.trim()} onClick={() => void copyStarlinkLabel()} title="Copy ELRN Starlink label"><ClipboardCopy size={15} />{starlinkCopyLabel}</button><button type="button" className="button" disabled={saving || deleting || !record.id.trim() || !record.siteName.trim()} onClick={() => void copyProjectName()} title="Copy ELRN project name"><ClipboardCopy size={15} />{projectCopyLabel}</button></div></div><div className="grid-3">
         <label className="school-lookup">Site name<input id="site-name-input" required className={`field${extractionHighlight("siteName")}`} role="combobox" aria-autocomplete="list" aria-expanded={schoolLookupOpen && schoolMatches.length > 0} aria-controls="school-directory-results" aria-invalid={Boolean((triedSubmit && missingSiteName) || duplicate) || undefined} aria-describedby={siteNameDescriptions} value={record.siteName} onFocus={() => setSchoolLookupOpen(true)} onBlur={() => window.setTimeout(() => setSchoolLookupOpen(false), 120)} onKeyDown={schoolLookupKeyDown} onChange={(e) => { patch({ siteName: e.target.value }); setSchoolLookupOpen(true); setSchoolLookupNotice(""); }} placeholder="Search or enter a school name" />{schoolLookupOpen && record.siteName.trim().length >= 2 && schoolMatches.length > 0 && <div className="school-lookup-results" id="school-directory-results" role="listbox">{schoolMatches.map((entry, index) => <button type="button" className={`school-lookup-option ${index === schoolLookupIndex ? "active" : ""}`} role="option" aria-selected={index === schoolLookupIndex} key={entry.id} onMouseDown={(event) => event.preventDefault()} onClick={() => selectDirectorySchool(entry)}><span className="school-lookup-name">{entry.schoolName}</span><span className="school-lookup-province">{entry.province || "Province unavailable"}</span></button>)}</div>}</label>
         <label>School ID<input id="school-id-input" required className={`field${extractionHighlight("id")}`} aria-invalid={Boolean((triedSubmit && !schoolId) || duplicateSchoolId) || undefined} aria-describedby={schoolIdDescriptions} value={record.id} onChange={(e) => patch({ id: e.target.value })} placeholder="School ID" /></label>
         <label>Solution<select id="solution-input" className={`select${extractionHighlight("unitType")}`} aria-invalid={Boolean(triedSubmit && missingUnitType) || undefined} aria-describedby={triedSubmit && missingUnitType ? "solution-required-error" : undefined} value={record.unitType} onChange={(e) => patch({ unitType: e.target.value })}>{activeOptions(refs.unitTypes, record.unitType).map((x) => <option key={x.id}>{x.name}</option>)}</select></label>
         <div><label>Contractor<select id="contractor-input" className={`select${extractionHighlight("contractor")}`} aria-invalid={Boolean(triedSubmit && missingContractor) || undefined} aria-describedby={triedSubmit && missingContractor ? "contractor-required-error" : undefined} value={record.contractor} onChange={(e) => { if (e.target.value === addContractorOption) { setAddingContractor(true); setContractorError(""); return; } patch({ contractor: e.target.value }); }}>{activeOptions(refs.contractors, record.contractor).map((x) => <option key={x.id}>{x.name}</option>)}<option value={addContractorOption}>+ Add contractor</option></select></label>{addingContractor && <div style={{ display: "grid", gap: 8, marginTop: 8 }}><input className="field" value={newContractorName} onChange={(e) => setNewContractorName(e.target.value)} placeholder="New contractor name" disabled={contractorSaving} /><div className="toolbar"><button type="button" className="button" disabled={contractorSaving} onClick={() => { setAddingContractor(false); setNewContractorName(""); setContractorError(""); }}>Cancel</button><button type="button" className="button primary" disabled={contractorSaving || !newContractorName.trim()} onClick={() => void submitNewContractor()}>{contractorSaving ? "Adding..." : "Add and select"}</button></div>{contractorError && <div className="small validation-copy">{contractorError}</div>}</div>}</div>
-        <label>Installer / Team lead<input className={`field${extractionHighlight("installerTeamLead")}`} value={record.installerTeamLead} onChange={(e) => patch({ installerTeamLead: e.target.value })} placeholder="Installer or team lead name" /></label>
+        <label>Installer / Team lead<input id="installer-team-lead-input" className={`field${extractionHighlight("installerTeamLead")}`} value={record.installerTeamLead} onChange={(e) => patch({ installerTeamLead: e.target.value })} placeholder="Installer or team lead name" /></label>
         <label>Installation date<input id="install-date-input" required className={`field${extractionHighlight("installDate")}`} type="date" aria-invalid={Boolean(triedSubmit && missingInstallDate) || undefined} aria-describedby={triedSubmit && missingInstallDate ? "install-date-required-error" : undefined} value={record.installDate} onChange={(e) => patch({ installDate: e.target.value })} /></label>
-        <label>Activation date<input className={`field${extractionHighlight("activationDate")}`} type="date" value={record.activationDate ?? ""} placeholder={today()} onChange={(e) => patch({ activationDate: e.target.value || undefined })} /></label>
+        <label>Activation date<input id="activation-date-input" className={`field${extractionHighlight("activationDate")}`} type="date" value={record.activationDate ?? ""} placeholder={today()} onChange={(e) => patch({ activationDate: e.target.value || undefined })} /></label>
         <label>Status<select className="select" value={record.status} onChange={(e) => patch({ status: e.target.value as Status })}>{siteStatusOptions(refs, record.status).map((status) => <option value={status.value} key={status.value}>{status.name}</option>)}</select></label>
       </div>{schoolLookupNotice && <div className="small muted school-lookup-notice" role="status">{schoolLookupNotice}</div>}{triedSubmit && missingSiteName && <div id="site-name-error" className="notice validation-notice inline" role="alert"><strong>Site name is required.</strong> Enter or choose the school name before saving.</div>}{triedSubmit && !schoolId && <div id="school-id-required-error" className="notice validation-notice inline" role="alert"><strong>School ID is required.</strong> Enter the official school identifier before saving.</div>}{duplicateSchoolId && <div id="school-id-duplicate-error" className="notice validation-notice inline" role="alert"><strong>This School ID already exists.</strong> Enter a unique School ID before saving.</div>}{duplicate && <div id="site-name-duplicate-error" className="notice validation-notice inline" role="alert"><strong>This site name already exists.</strong> Enter a unique site name before saving.</div>}{triedSubmit && missingUnitType && <div id="solution-required-error" className="notice validation-notice inline" role="alert"><strong>Solution is required.</strong> Choose the installation solution before saving.</div>}{triedSubmit && missingContractor && <div id="contractor-required-error" className="notice validation-notice inline" role="alert"><strong>Contractor is required.</strong> Choose or add the contractor before saving.</div>}{triedSubmit && missingInstallDate && <div id="install-date-required-error" className="notice validation-notice inline" role="alert"><strong>Installation date is required.</strong> Enter the installation date before saving.</div>}{record.legacyKitNumber && <div className="notice inline legacy-kit-prompt"><span className="small migration-label">Migration follow-up</span><strong>Assign old kit number: {record.legacyKitNumber}</strong><div className="small">Add the correct equipment, enter this value in its kit-number field, then mark this follow-up as assigned.</div><button type="button" className="button" onClick={() => patch({ legacyKitNumber: undefined })}>Mark kit number assigned</button></div>}</section>
-      <section id="site-location-section" className="section"><div className="section-title"><div><h2>Site location</h2><span className="small muted">PSGC-aligned fields use the selected school directory match</span></div><div className="toolbar"><button type="button" className="button" disabled={saving || deleting || (!record.latitude.trim() && !record.longitude.trim())} onClick={() => void copyLatLong()} title="Copy latitude and longitude"><ClipboardCopy size={15} />{latLongCopyState === "copied" ? "Copied Coordinates" : latLongCopyState === "error" ? "Copy failed" : "Copy Coordinates"}</button><button type="button" className="button" disabled={saving || deleting || !record.latitude.trim() || !record.longitude.trim()} onClick={() => void copyPlusCode()} title="Copy Google Maps Plus Code from latitude and longitude"><ClipboardCopy size={15} />{plusCodeCopyState === "copied" ? "Copied Plus Code" : plusCodeCopyState === "error" ? "Copy failed" : "Copy Plus Code"}</button></div></div><div className="grid-4">
+      <section id="site-location-section" className="section"><div className="section-title"><div><h2>Site location</h2><span className="small muted">PSGC-aligned fields use the selected school directory match</span></div><div className="toolbar section-copy-actions" aria-label="Copy coordinates"><span>Coordinates</span><button type="button" className="button" disabled={saving || deleting || (!record.latitude.trim() && !record.longitude.trim())} onClick={() => void copyLatLong()} title="Copy latitude and longitude"><ClipboardCopy size={15} />{coordinateCopyLabel}</button><button type="button" className="button" disabled={saving || deleting || !record.latitude.trim() || !record.longitude.trim()} onClick={() => void copyPlusCode()} title="Copy Google Maps Plus Code from latitude and longitude"><ClipboardCopy size={15} />{plusCodeCopyLabel}</button></div></div><div className="grid-4">
         <LocationCombobox inputId="island-group-input" label="Island group" placeholder="Search island group" value={record.islandGroup} options={islandGroups.map((group) => ({ code: group, name: group }))} invalid={triedSubmit && !record.islandGroup} describedBy={locationDescription} highlight={extractionHighlights.includes("islandGroup")} onSelect={(selected) => patch({ islandGroup: selected.code as Installation["islandGroup"], region: "", regionCode: "", province: "", provinceCode: "", municipality: "", municipalityCode: "", barangay: "", barangayCode: "" })} />
         <LocationCombobox inputId="region-input" label="Region" placeholder="Search region" value={record.regionCode} options={regions} loading={regionChoices.loading} disabled={!record.islandGroup} invalid={triedSubmit && !record.regionCode} describedBy={locationDescription} highlight={extractionHighlights.includes("regionCode")} onSelect={(selected) => patch({ region: selected.name, regionCode: selected.code, province: "", provinceCode: "", municipality: "", municipalityCode: "", barangay: "", barangayCode: "" })} />
         <LocationCombobox inputId="province-input" label="Province" placeholder="Search province" value={record.provinceCode} options={provinceChoices.options} loading={provinceChoices.loading} disabled={!record.regionCode} invalid={triedSubmit && !record.provinceCode} describedBy={locationDescription} highlight={extractionHighlights.includes("provinceCode")} onSelect={(selected) => patch({ province: selected.name, provinceCode: selected.code, municipality: "", municipalityCode: "", barangay: "", barangayCode: "" })} />
         <LocationCombobox inputId="locality-input" label="Locality" placeholder="Search locality" value={record.municipalityCode} options={municipalityChoices.options} loading={municipalityChoices.loading} disabled={!record.provinceCode} invalid={triedSubmit && !record.municipalityCode} describedBy={locationDescription} highlight={extractionHighlights.includes("municipalityCode")} onSelect={(selected) => patch({ municipality: selected.name, municipalityCode: selected.code, barangay: "", barangayCode: "" })} />
-        <LocationCombobox label="Barangay" placeholder="Search barangay" value={record.barangayCode} options={barangayChoices.options} loading={barangayChoices.loading} disabled={!record.municipalityCode} highlight={extractionHighlights.includes("barangayCode")} clearLabel="No barangay" onClear={() => patch({ barangay: "", barangayCode: "" })} onSelect={(selected) => patch({ barangay: selected.name, barangayCode: selected.code })} />
-        <label>Latitude<input className={`field${extractionHighlight("latitude")}`} value={record.latitude} onChange={(e) => patch({ latitude: e.target.value })} placeholder="14.0000" /></label>
-        <label>Longitude<input className={`field${extractionHighlight("longitude")}`} value={record.longitude} onChange={(e) => patch({ longitude: e.target.value })} placeholder="121.0000" /></label>
-      </div><label className="field-block">Contractor-provided address<textarea className={`textarea${extractionHighlight("contractorAddress")}`} rows={2} value={record.contractorAddress} onChange={(event) => patch({ contractorAddress: parseContractorAddress(event.target.value) })} placeholder="Paste Complete School Address or the contractor address text" /></label>{locationError && <div className="notice validation-notice inline" role="alert"><strong>Unable to load location options.</strong> {locationError}</div>}{triedSubmit && missingLocation && <div id="location-required-error" className="notice validation-notice inline" role="alert"><strong>Complete the site location.</strong> Select an island group, region, province, and locality.</div>}</section>
+        <LocationCombobox inputId="barangay-input" label="Barangay" placeholder="Search barangay" value={record.barangayCode} options={barangayChoices.options} loading={barangayChoices.loading} disabled={!record.municipalityCode} highlight={extractionHighlights.includes("barangayCode")} clearLabel="No barangay" onClear={() => patch({ barangay: "", barangayCode: "" })} onSelect={(selected) => patch({ barangay: selected.name, barangayCode: selected.code })} />
+        <label>Latitude<input id="latitude-input" className={`field${extractionHighlight("latitude")}`} value={record.latitude} onChange={(e) => patch({ latitude: e.target.value })} placeholder="14.0000" /></label>
+        <label>Longitude<input id="longitude-input" className={`field${extractionHighlight("longitude")}`} value={record.longitude} onChange={(e) => patch({ longitude: e.target.value })} placeholder="121.0000" /></label>
+      </div><label className="field-block">Contractor-provided address<textarea id="contractor-address-input" className={`textarea${extractionHighlight("contractorAddress")}`} rows={2} value={record.contractorAddress} onChange={(event) => patch({ contractorAddress: parseContractorAddress(event.target.value) })} placeholder="Paste Complete School Address or the contractor address text" /></label>{locationError && <div className="notice validation-notice inline" role="alert"><strong>Unable to load location options.</strong> {locationError}</div>}{triedSubmit && missingLocation && <div id="location-required-error" className="notice validation-notice inline" role="alert"><strong>Complete the site location.</strong> Select an island group, region, province, and locality.</div>}</section>
       {requiredCustomFields.length > 0 && <section id="required-additional-section" className="section"><div className="section-title"><div><h2>Required additional information</h2><span className="small muted">Configured by your workplace administrator.</span></div></div><div className="grid-3">{requiredCustomFields.map((field) => <CustomFieldInput inputId={`custom-field-${field.id}`} field={field} value={(record.customValues ?? {})[field.id] ?? ""} invalid={triedSubmit && !(record.customValues ?? {})[field.id]?.trim()} describedBy={triedSubmit && !(record.customValues ?? {})[field.id]?.trim() ? "required-custom-error" : undefined} onChange={(value) => patch({ customValues: { ...(record.customValues ?? {}), [field.id]: value } })} key={field.id} />)}</div>{triedSubmit && missingRequiredCustomField && <div id="required-custom-error" className="notice validation-notice inline" role="alert"><strong>Complete required additional information.</strong> Fill in {missingRequiredCustomField.label} before saving.</div>}</section>}
       {optionalCustomFields.length > 0 && <section id="optional-additional-section" className="section collapsible-section"><button type="button" className="button disclosure-button" aria-expanded={showOptionalFields} onClick={() => setShowOptionalFields((show) => !show)}><span><strong>Optional additional information</strong><small>{optionalValueCount ? `${optionalValueCount} of ${optionalFieldCount} filled` : `${optionalFieldCount} optional ${optionalFieldCount === 1 ? "field" : "fields"}`}</small></span><ChevronDown size={15} /></button>{showOptionalFields && <div className="grid-3 collapsible-section-body">{optionalCustomFields.map((field) => <CustomFieldInput field={field} value={(record.customValues ?? {})[field.id] ?? ""} onChange={(value) => patch({ customValues: { ...(record.customValues ?? {}), [field.id]: value } })} key={field.id} />)}</div>}</section>}
       <section id="equipment-section" className="section equipment-section"><div className="section-title equipment-section-title"><div><h2>Equipment</h2><span className="small muted">Record the identifiers shown for each equipment type.</span></div><div className="toolbar"><button type="button" className="button" onClick={addComponent}><Plus size={15} />Add equipment</button></div></div>
@@ -1442,12 +1534,12 @@ function InstallationForm({
       </section>
       <section id="beneficiary-contact-section" className="section"><div className="section-title equipment-section-title"><div><h2>Beneficiary contact</h2><span className="small muted">Optional school or site contacts for coordination</span></div><button type="button" className="button" onClick={addBeneficiaryContact}><Plus size={15} />Add contact person</button></div><div className="equipment-list">
         {beneficiaryContacts.map((contact, index) => <div className="component-template-row" key={contact.id}><div className="component-row">
-          <label>Name<input className={`field${extractionHighlight(`beneficiary:${contact.id}:name`)}`} value={contact.name} onChange={(e) => beneficiaryContactPatch(contact.id, { name: e.target.value })} placeholder="Contact person" /></label>
-          <label>Phone number<input className={`field${extractionHighlight(`beneficiary:${contact.id}:phone`)}`} value={contact.phone} onChange={(e) => beneficiaryContactPatch(contact.id, { phone: e.target.value })} placeholder="Mobile or landline" /></label>
+          <label>Name<input id={`beneficiary-${contact.id}-name`} className={`field${extractionHighlight(`beneficiary:${contact.id}:name`)}`} value={contact.name} onChange={(e) => beneficiaryContactPatch(contact.id, { name: e.target.value })} placeholder="Contact person" /></label>
+          <label>Phone number<input id={`beneficiary-${contact.id}-phone`} className={`field${extractionHighlight(`beneficiary:${contact.id}:phone`)}`} value={contact.phone} onChange={(e) => beneficiaryContactPatch(contact.id, { phone: e.target.value })} placeholder="Mobile or landline" /></label>
           {index > 0 && <span className="component-actions"><button type="button" className="button icon-button danger" aria-label="Remove contact person" title="Remove contact person" onClick={() => removeBeneficiaryContact(contact.id)}><Trash2 size={16} /></button></span>}
         </div></div>)}
       </div></section>
-      <section id="remarks-photos-section" className="section collapsible-section"><button type="button" className="button disclosure-button" aria-expanded={showNotesPhotos} onClick={() => setShowNotesPhotos((show) => !show)}><span><strong>Remarks and photos</strong><small>{record.remarks || record.photos.length ? `${record.remarks ? "Notes added" : "No notes"} | ${record.photos.length} ${record.photos.length === 1 ? "photo" : "photos"}` : "Optional notes and photo evidence"}</small></span><ChevronDown size={15} /></button>{showNotesPhotos && <div className="grid-2 collapsible-section-body"><div><div className="section-title"><h2>Remarks</h2></div><textarea className={`textarea${extractionHighlight("remarks")}`} rows={5} value={record.remarks} onChange={(e) => patch({ remarks: e.target.value })} placeholder="Activation notes, issue details, or follow-up action" /></div><div><div className="section-title"><h2>Site photos</h2><span className="small muted">Optional, up to 4 images</span></div><label className="dropzone"><ImagePlus size={21} style={{ margin: "auto" }} /><span>Choose site photos</span><input type="file" accept="image/*" multiple hidden onChange={photos} /></label>{record.photos.length > 0 && <p className="small muted">{record.photos.map((p) => p.name).join(", ")}</p>}</div></div>}</section>
+      <section id="remarks-photos-section" className="section collapsible-section"><button type="button" className="button disclosure-button" aria-expanded={showNotesPhotos} onClick={() => setShowNotesPhotos((show) => !show)}><span><strong>Remarks and photos</strong><small>{record.remarks || record.photos.length ? `${record.remarks ? "Notes added" : "No notes"} | ${record.photos.length} ${record.photos.length === 1 ? "photo" : "photos"}` : "Optional notes and photo evidence"}</small></span><ChevronDown size={15} /></button>{showNotesPhotos && <div className="grid-2 collapsible-section-body"><div><div className="section-title"><h2>Remarks</h2></div><textarea id="remarks-input" className={`textarea${extractionHighlight("remarks")}`} rows={5} value={record.remarks} onChange={(e) => patch({ remarks: e.target.value })} placeholder="Activation notes, issue details, or follow-up action" /></div><div><div className="section-title"><h2>Site photos</h2><span className="small muted">Optional, up to 4 images</span></div><label className="dropzone"><ImagePlus size={21} style={{ margin: "auto" }} /><span>Choose site photos</span><input type="file" accept="image/*" multiple hidden onChange={photos} /></label>{record.photos.length > 0 && <p className="small muted">{record.photos.map((p) => p.name).join(", ")}</p>}</div></div>}</section>
     </fieldset>}
     {tab === "visits" && <div id="site-panel-visits" aria-labelledby="site-tab-visits" className="panel" role="tabpanel"><div className="panel-head"><div><h2>Service visits</h2><div className="small muted">Contractor revisits, maintenance, and equipment changes</div></div>{!readOnly && <button type="button" className="button primary" onClick={() => navigate(`/service-visits/new?site=${encodeURIComponent(record.id)}&returnTo=${encodeURIComponent(`/sites/${record.id}`)}`)}><Plus size={15} />New service visit</button>}</div>{visitsLoading ? <div className="section muted">Loading service visits...</div> : visitsError ? <div className="section notice validation-notice"><strong>Unable to load service visits.</strong> {visitsError}</div> : <ServiceVisitTable visits={serviceVisits.map((visit) => ({ installation: record, visit }))} onSelect={(_, visit) => navigate(`/service-visits/${encodeURIComponent(visit.id)}?returnTo=${encodeURIComponent(`/sites/${record.id}`)}`)} />}</div>}
     {tab === "audit" && <div id="site-panel-audit" aria-labelledby="site-tab-audit" className="panel" role="tabpanel"><div className="panel-head"><div><h2>Change log</h2><div className="small muted">Permanent history of record updates and service activity</div></div><History size={18} className="muted" /></div>{auditLoading ? <div className="section muted">Loading change log...</div> : auditError ? <div className="section notice validation-notice"><strong>Unable to load the change log.</strong> {auditError}</div> : <AuditTimeline events={auditEvents} />}</div>}

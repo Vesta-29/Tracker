@@ -87,6 +87,8 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .record-id { margin-top: 5px; }
 .site-record-actions { display: grid; justify-items: end; gap: 7px; }
 .site-record-copy-actions, .site-record-main-actions { display: flex; align-items: center; gap: 8px; }
+.site-record-copy-group { display: flex; align-items: center; gap: 7px; }
+.site-record-copy-group > span, .section-copy-actions > span { color: var(--ink-muted); font-size: 11px; font-weight: 800; white-space: nowrap; }
 .site-record-copy-actions { gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-muted); }
 .site-record-copy-button { min-height: 32px; padding: 0 9px; color: var(--ink-muted); font-size: 13px; }
 .site-record-copy-button:hover:not(:disabled) { color: var(--ink); background: var(--surface); }
@@ -242,7 +244,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .tabs span { min-width: 19px; padding: 2px 5px; border-radius: 99px; background: var(--surface-muted); color: var(--ink-muted); font-size: 11px; }
 .ownership-grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 14px; padding-top: 13px; padding-bottom: 13px; background: var(--surface-muted); }
 .ownership-grid div { display: grid; gap: 4px; }
-.site-fields { margin: 0; padding: 0; }
+.site-fields { margin: 0; padding: 0 0 120px; }
 .site-fields:disabled { border-color: var(--line); }
 .site-fields.viewing > .section:not(.ownership-grid) { padding-top: 19px; padding-bottom: 19px; }
 .site-fields:disabled label { gap: 4px; }
@@ -274,6 +276,14 @@ tbody tr:last-child td { border-bottom: 0; }
 .paste-report-summary > div:first-child { display: grid; gap: 3px; }
 .paste-report-summary > ul { grid-column: 1 / -1; display: grid; gap: 4px; margin: 3px 0 0; padding-left: 18px; color: oklch(0.45 0.09 65); font-size: 12px; line-height: 1.4; }
 .paste-report-diagnostics { grid-column: 1 / -1; line-height: 1.45; }
+.extraction-review { grid-column: 1 / -1; display: grid; gap: 8px; min-width: 0; padding: 10px; border: 1px solid oklch(0.82 0.055 155); border-radius: 8px; background: var(--surface); }
+.extraction-review-head { display: inline-flex; align-items: center; gap: 7px; color: var(--accent); font-size: 12px; }
+.extraction-review-head svg { flex: 0 0 auto; }
+.extraction-review-list { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.extraction-review-item { display: inline-grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 6px; max-width: min(100%, 330px); min-height: 30px; border: 1px solid oklch(0.84 0.035 155); border-radius: 7px; padding: 5px 8px; color: var(--ink); background: oklch(0.99 0.006 155); font-size: 12px; text-align: left; cursor: pointer; transition: border-color 160ms var(--ease-out), background-color 160ms var(--ease-out), color 160ms var(--ease-out); }
+.extraction-review-item span { color: var(--ink-muted); font-weight: 750; }
+.extraction-review-item strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 750; }
+.extraction-review-item:hover, .extraction-review-item:focus-visible { border-color: oklch(0.72 0.07 164); background: var(--accent-soft); color: var(--accent); }
 .site-details-polish .section-title { margin-bottom: 16px; }
 .site-details-polish .grid-3 { gap: 18px 16px; }
 .legacy-kit-prompt { display: grid; grid-template-columns: 1fr auto; gap: 4px 16px; align-items: center; padding: 12px 14px; }
@@ -579,6 +589,7 @@ tbody tr:last-child td { border-bottom: 0; }
   .site-required-summary > div:first-child { min-width: 0; }
   .site-required-steps { justify-content: flex-start; }
   .site-record-actions { display: grid; grid-template-columns: 1fr; width: 100%; }
+  .site-record-copy-group { display: grid; grid-template-columns: 1fr; width: 100%; gap: 4px; }
   .site-record-copy-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; gap: 3px; }
   .site-record-main-actions { display: grid; grid-template-columns: 1fr; width: 100%; gap: 7px; }
   .site-record-actions .button { width: 100%; }
