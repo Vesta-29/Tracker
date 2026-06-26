@@ -67,6 +67,52 @@ describe("parseSiteActivationReport", () => {
     expect(result.values).toMatchObject({ schoolId: "42", siteName: "Test ES", ruijieRouterSerial: "R-1", activationDate: "2026-06-25", latitude: "10.1", longitude: "120.2" });
   });
 
+  it("handles labels with a colon and no following space", () => {
+    const result = parseSiteActivationReport(`Site Code:500604
+School Name:Agno Elementary School
+Date:June 25, 2026
+Starlink KIT Number:KIT4P00054292MG7
+AP 1 Indoor:G1UC0BC013748
+AP 2 Indoor:G1UC2LK00941A
+AP 3 Outdoor:G1UC09S011774
+Router:H1V10XN001454
+Lat:10.577450\u00b0N
+Long:123.423355\u00b0E`);
+    expect(result.values).toMatchObject({
+      schoolId: "500604",
+      siteName: "Agno Elementary School",
+      installDate: "2026-06-25",
+      activationDate: "2026-06-25",
+      starlinkKitNumber: "KIT4P00054292MG7",
+      ap1IndoorSerial: "G1UC0BC013748",
+      ap2IndoorSerial: "G1UC2LK00941A",
+      ap3OutdoorSerial: "G1UC09S011774",
+      ruijieRouterSerial: "H1V10XN001454",
+      latitude: "10.57745",
+      longitude: "123.423355",
+    });
+  });
+
+  it("splits compact inline label-value fields", () => {
+    const result = parseSiteActivationReport("Site Code:500604 School Name:Agno Elementary School Date:June 25, 2026 Company Name:Amers Team Lead Name:Adrian Trillana Starlink KIT Number:KIT4P00054292MG7 AP 1 Indoor:G1UC0BC013748 AP 2 Indoor:G1UC2LK00941A AP 3 Outdoor:G1UC09S011774 Router:H1V10XN001454 Beneficiary:Febe D. Jalandoni Contact Number:09300498263 Remarks:Activated");
+    expect(result.values).toMatchObject({
+      schoolId: "500604",
+      siteName: "Agno Elementary School",
+      installDate: "2026-06-25",
+      activationDate: "2026-06-25",
+      contractor: "Amers",
+      installerTeamLead: "Adrian Trillana",
+      starlinkKitNumber: "KIT4P00054292MG7",
+      ap1IndoorSerial: "G1UC0BC013748",
+      ap2IndoorSerial: "G1UC2LK00941A",
+      ap3OutdoorSerial: "G1UC09S011774",
+      ruijieRouterSerial: "H1V10XN001454",
+      beneficiaryName: "Febe D. Jalandoni",
+      beneficiaryPhone: "09300498263",
+      remarks: "Activated",
+    });
+  });
+
   it("captures multiline remarks and tolerates missing optional fields", () => {
     const result = parseSiteActivationReport("School Name: Small ES\nRemarks: First line\nSecond line");
     expect(result.values.remarks).toBe("First line Second line");
@@ -131,6 +177,17 @@ Teacher II
       longitude: "123.239024",
     });
     expect(parenthesized.diagnostics).toContain("Flag Pole coordinates selected for the site.");
+  });
+
+  it("accepts degree coordinates with cardinal directions", () => {
+    expect(parseSiteActivationReport("Actual Coordinates: 10.577450°N, 123.423355°E").values).toMatchObject({
+      latitude: "10.57745",
+      longitude: "123.423355",
+    });
+    expect(parseSiteActivationReport("Actual Coordinates: 10.577450°S, 123.423355°W").values).toMatchObject({
+      latitude: "-10.57745",
+      longitude: "-123.423355",
+    });
   });
 
   it("normalizes contractor-provided address paste formats", () => {

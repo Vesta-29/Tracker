@@ -287,6 +287,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .component-row { display: grid; grid-template-columns: minmax(180px, 1fr) repeat(2, minmax(180px, 1fr)) auto; gap: 8px; align-items: end; }
 .component-row label { min-width: 0; }
 .component-row .icon-button { flex: 0 0 auto; width: 38px; height: 38px; }
+.equipment-field-copy-row { display: grid; grid-template-columns: minmax(0, 1fr) 38px; gap: 6px; align-items: center; }
+.equipment-copy-button:disabled { opacity: .42; }
 .component-actions { display: flex; align-items: end; justify-content: flex-end; gap: 6px; min-width: 82px; }
 .note-action { position: relative; align-self: end; }
 .note-action .has-note { color: var(--accent); border-color: oklch(0.78 0.06 164); background: var(--accent-soft); }

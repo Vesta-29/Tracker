@@ -62,8 +62,14 @@ const labelMatches = (label: string, candidates: readonly string[]) => {
     return normalized === target || normalized.startsWith(`${target} `);
   });
 };
+const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const inlineLabelPattern = new RegExp(
+  String.raw`(^|[^\r\n])\s*(${Object.values(aliases).flatMap((group) => group ?? []).sort((a, b) => b.length - a.length).map(escapeRegex).join("|")})\s*:`,
+  "gi",
+);
+const normalizeInlineLabels = (text: string) => text.replace(inlineLabelPattern, (_match, prefix: string, label: string) => `${prefix}${prefix ? "\n" : ""}${label}:`);
 
-const splitLines = (text: string) => text.split(/\r?\n/).map((raw, index) => {
+const splitLines = (text: string) => normalizeInlineLabels(text).split(/\r?\n/).map((raw, index) => {
   const colon = raw.indexOf(":");
   return { index, raw, label: colon >= 0 ? raw.slice(0, colon).trim() : "", value: colon >= 0 ? raw.slice(colon + 1).trim() : "" };
 });
@@ -117,9 +123,22 @@ export function normalizeSiteReportDate(value: unknown) {
 }
 
 function coordinatePair(text: string) {
-  const latitude = text.match(/\blat(?:itude)?\b\s*[:=]?\s*(-?\d{1,3}(?:\.\d+)?)/i)?.[1] ?? "";
-  const longitude = text.match(/\b(?:long(?:itude)?|lng)\b\s*[:=]?\s*(-?\d{1,3}(?:\.\d+)?)/i)?.[1] ?? "";
+  const parseDirected = (match: RegExpMatchArray | null, axis: "latitude" | "longitude") => {
+    if (!match) return "";
+    const value = Number(match[1]) * (/[SW]/i.test(match[2] ?? "") ? -1 : 1);
+    const limit = axis === "latitude" ? 90 : 180;
+    return Math.abs(value) <= limit ? String(value) : "";
+  };
+  const degree = String.raw`(?:\u00b0|Â°)?`;
+  const latitude = parseDirected(text.match(new RegExp(String.raw`\blat(?:itude)?\b\s*[:=]?\s*(-?\d{1,3}(?:\.\d+)?)\s*${degree}\s*([NS])?`, "i")), "latitude");
+  const longitude = parseDirected(text.match(new RegExp(String.raw`\b(?:long(?:itude)?|lng)\b\s*[:=]?\s*(-?\d{1,3}(?:\.\d+)?)\s*${degree}\s*([EW])?`, "i")), "longitude");
   if (latitude || longitude) return { latitude, longitude };
+  const directedPair = text.match(new RegExp(String.raw`\(?\s*(\d{1,3}(?:\.\d+)?)\s*${degree}\s*([NS])\s*[,;/ ]+\s*(\d{1,3}(?:\.\d+)?)\s*${degree}\s*([EW])\s*\)?`, "i"));
+  if (directedPair) {
+    const lat = Number(directedPair[1]) * (directedPair[2].toUpperCase() === "S" ? -1 : 1);
+    const lng = Number(directedPair[3]) * (directedPair[4].toUpperCase() === "W" ? -1 : 1);
+    if (Math.abs(lat) <= 90 && Math.abs(lng) <= 180) return { latitude: String(lat), longitude: String(lng) };
+  }
   const labeledPair = text.match(/\b(?:actual\s+)?coordinates?\b(?:\s*\([^)]*\))?\s*[:=]?\s*\(?\s*(-?\d{1,3}\.\d+)\s*[,;/ ]+\s*(-?\d{1,3}\.\d+)\s*\)?/i);
   const plainPair = text.match(/(?:^|\n|\s|\()(-?\d{1,3}\.\d+)\s*[,;/ ]+\s*(-?\d{1,3}\.\d+)(?:\s|$|\))/);
   const pair = labeledPair ?? plainPair;
