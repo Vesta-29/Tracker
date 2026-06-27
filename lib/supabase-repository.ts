@@ -19,10 +19,10 @@ let usersRequest: Promise<Profile[]> | undefined;
 const usersCacheMs = 60_000;
 const operationalCacheMs = 60_000;
 const defaultSiteStatuses: StatusReferenceOption[] = [
-  { id: "status-scheduled", value: "scheduled", name: "Scheduled", active: true, order: 0 },
-  { id: "status-installed", value: "installed", name: "Installed", active: true, order: 1 },
-  { id: "status-issue", value: "issue", name: "Issue", active: true, order: 2 },
-  { id: "status-cancelled", value: "cancelled", name: "Cancelled", active: true, order: 3 },
+  { id: "status-scheduled", value: "scheduled", name: "Scheduled", active: true, order: 0, color: "#2f6fcb" },
+  { id: "status-installed", value: "installed", name: "Installed", active: true, order: 1, color: "#138a54" },
+  { id: "status-issue", value: "issue", name: "Issue", active: true, order: 2, color: "#b97812" },
+  { id: "status-cancelled", value: "cancelled", name: "Cancelled", active: true, order: 3, color: "#b85643" },
 ];
 function invalidRefreshToken(error: unknown) { return typeof error === "object" && error !== null && "code" in error && (error.code === "refresh_token_not_found" || error.code === "refresh_token_already_used"); }
 function missingStatusReferenceTable(error: unknown) {
@@ -30,6 +30,12 @@ function missingStatusReferenceTable(error: unknown) {
     && error !== null
     && "message" in error
     && String(error.message).includes("installation_status_options");
+}
+function missingStatusColorColumn(error: unknown) {
+  return typeof error === "object"
+    && error !== null
+    && "message" in error
+    && String(error.message).includes("color");
 }
 function missingDefaultComponentTypeColumn(error: unknown) {
   return typeof error === "object"
@@ -210,7 +216,7 @@ export async function loadReferences({ force = false }: { force?: boolean } = {}
   referencesRequest = (async () => {
     const client = supabase();
     const [siteStatuses, contractors, unitTypes, componentTypesWithDefault, equipmentFields, customFields, serviceVisitTypes] = await Promise.all([
-      client.from("installation_status_options").select("id,value,name,active,display_order").order("display_order").order("name"),
+      client.from("installation_status_options").select("id,value,name,active,display_order,color").order("display_order").order("name"),
       client.from("contractors").select("id,name,active,display_order").order("display_order").order("name"),
       client.from("unit_types").select("id,name,active,display_order").order("display_order").order("name"),
       client.from("component_types").select("id,name,active,display_order,default_on_new_site,component_field_definitions(id,library_field_id,required,active,display_order)").order("display_order").order("name"),
@@ -222,10 +228,14 @@ export async function loadReferences({ force = false }: { force?: boolean } = {}
       ? await client.from("component_types").select("id,name,active,display_order,component_field_definitions(id,library_field_id,required,active,display_order)").order("display_order").order("name")
       : componentTypesWithDefault;
     for (const result of [contractors, unitTypes, componentTypes, equipmentFields, customFields, serviceVisitTypes]) if (result.error) throw result.error;
-    if (siteStatuses.error && !missingStatusReferenceTable(siteStatuses.error)) throw siteStatuses.error;
-    cachedReferences = {
+    const statusRows = siteStatuses.error && missingStatusColorColumn(siteStatuses.error)
+      ? await client.from("installation_status_options").select("id,value,name,active,display_order").order("display_order").order("name")
+      : siteStatuses;
+    if (statusRows.error && !missingStatusReferenceTable(statusRows.error)) throw statusRows.error;
+    const siteStatusOptions: StatusReferenceOption[] = statusRows.error ? defaultSiteStatuses : (statusRows.data ?? []).map((row: any) => ({ id: row.id, value: row.value as Status, name: row.name, active: row.active, order: row.display_order, color: typeof row.color === "string" ? row.color : defaultSiteStatuses.find((status) => status.value === row.value)?.color }));
+    const nextReferences: ReferenceData = {
       schoolDirectory: [],
-      siteStatuses: siteStatuses.error ? defaultSiteStatuses : siteStatuses.data!.map((row) => ({ id: row.id, value: row.value as Status, name: row.name, active: row.active, order: row.display_order })),
+      siteStatuses: siteStatusOptions,
       contractors: contractors.data!.map((row) => ({ id: row.id, name: row.name, active: row.active, order: row.display_order })),
       unitTypes: unitTypes.data!.map((row) => ({ id: row.id, name: row.name, active: row.active, order: row.display_order })),
       componentTypes: componentTypes.data!.map((row) => ({ id: row.id, name: row.name, active: row.active, order: row.display_order, defaultOnNewSite: Boolean("default_on_new_site" in row && row.default_on_new_site), fields: row.component_field_definitions.map((field) => ({ id: field.id, libraryFieldId: field.library_field_id, required: field.required, active: field.active, order: field.display_order })) })),
@@ -233,8 +243,9 @@ export async function loadReferences({ force = false }: { force?: boolean } = {}
       customFields: customFields.data!.map((row) => ({ id: row.id, label: row.label, type: row.field_type, required: row.required, active: row.active, order: row.display_order, options: row.custom_field_options })),
       serviceVisitTypes: serviceVisitTypes.data!.map((row) => ({ id: row.id, name: row.name, active: row.active, order: row.display_order })),
     };
+    cachedReferences = nextReferences;
     cachedReferencesAt = Date.now();
-    return cachedReferences;
+    return nextReferences;
   })();
   try { return await referencesRequest; } finally { referencesRequest = undefined; }
 }
@@ -430,7 +441,10 @@ export async function persistReferences(refs: ReferenceData, previous?: Referenc
   const client = supabase();
   const save = async (table: string, rows: object[], onConflict = "id") => { if (!rows.length) return; const { error } = await client.from(table).upsert(rows, { onConflict }); if (error) throw error; };
   const changed = <K extends keyof ReferenceData>(key: K) => !previous || JSON.stringify(refs[key]) !== JSON.stringify(previous[key]);
-  if (changed("siteStatuses")) await save("installation_status_options", refs.siteStatuses.map(({ id, value, name, active, order }, index) => ({ id, value, name, active, display_order: order ?? index })));
+  if (changed("siteStatuses")) {
+    try { await save("installation_status_options", refs.siteStatuses.map(({ id, value, name, active, order, color }, index) => ({ id, value, name, active, color, display_order: order ?? index }))); }
+    catch (error) { if (missingStatusColorColumn(error)) throw new Error("Apply the latest Supabase migration before saving status colors."); throw error; }
+  }
   if (changed("contractors")) await save("contractors", refs.contractors.map(({ id, name, active, order }, index) => ({ id, name, active, display_order: order ?? index })));
   if (changed("unitTypes")) await save("unit_types", refs.unitTypes.map(({ id, name, active, order }, index) => ({ id, name, active, display_order: order ?? index })));
   if (changed("serviceVisitTypes")) await save("service_visit_types", refs.serviceVisitTypes.map(({ id, name, active, order }, index) => ({ id, name, active, display_order: order ?? index })));

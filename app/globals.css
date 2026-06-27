@@ -228,6 +228,9 @@ h3 { font-size: 14px; margin: 0; }
 .field.search { min-width: 230px; padding-left: 34px; }
 .input-wrap { position: relative; }
 .input-icon { pointer-events: none; position: absolute; left: 10px; top: 10px; color: var(--ink-muted); }
+.status-select-wrap { position: relative; display: block; }
+.status-select { padding-left: 32px; }
+.status-select-dot { pointer-events: none; position: absolute; z-index: 2; left: 12px; top: 50%; width: 9px; height: 9px; transform: translateY(-50%); box-shadow: 0 0 0 3px color-mix(in oklch, currentColor 10%, transparent); }
 .location-combobox { position: relative; }
 .location-combobox-icon { pointer-events: none; position: absolute; z-index: 2; left: 10px; top: 11px; color: var(--ink-muted); }
 .location-combobox-input { padding-left: 33px; }
@@ -278,6 +281,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .site-fields:disabled label { gap: 4px; }
 .site-fields:disabled .field, .site-fields:disabled .select, .site-fields:disabled .textarea { min-height: 24px; padding: 1px 0; color: var(--ink); background: transparent; border-color: transparent; border-radius: 0; opacity: 1; }
 .site-fields:disabled .select { appearance: none; background-image: none; }
+.site-fields:disabled .status-select { padding-left: 18px; }
+.site-fields:disabled .status-select-dot { left: 0; width: 8px; height: 8px; }
 .site-fields:disabled .textarea { min-height: 54px; resize: none; }
 .site-fields:disabled ::placeholder { color: var(--ink-muted); opacity: .68; }
 .site-fields:disabled .dropzone, .site-fields:disabled .danger, .site-fields:disabled .section-title .button { display: none; }
@@ -366,8 +371,11 @@ tbody tr:last-child td { border-bottom: 0; }
 .settings-mobile-select { display: none; }
 .reference-save-status { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; border-radius: 99px; padding: 0 10px; color: var(--ink-muted); background: var(--surface-muted); font-size: 12px; font-weight: 700; }
 .reference-save-status.dirty { color: oklch(0.52 0.11 70); background: oklch(0.97 0.035 76); }
-.reference-save-status.failed { color: var(--danger); background: oklch(0.94 0.035 28); }
+.reference-save-status.failed { align-items: flex-start; max-width: min(430px, 100%); min-height: 38px; border-radius: 8px; padding: 7px 8px 7px 10px; color: var(--danger); background: oklch(0.94 0.035 28); }
 .reference-save-status .button { min-height: 28px; padding: 0 4px; color: inherit; font-size: 12px; }
+.reference-save-status-message { display: grid; gap: 1px; min-width: 0; line-height: 1.25; }
+.reference-save-status-message strong { font-size: 12px; }
+.reference-save-status-message small { color: oklch(0.4 0.08 28); font-size: 11px; font-weight: 650; overflow-wrap: anywhere; }
 .reference-save-overlay { pointer-events: none; position: fixed; inset: 58px 0 0 232px; z-index: 19; display: grid; place-items: center; padding: 24px; animation: fade-in 140ms var(--ease-out); }
 .reference-save-overlay.saving, .reference-save-overlay.failed { background: oklch(0.976 0.007 155 / .56); backdrop-filter: blur(2px); }
 .reference-save-card { pointer-events: none; display: flex; align-items: center; gap: 11px; width: min(380px, 100%); padding: 13px 15px; border: 1px solid oklch(0.83 0.03 155); border-radius: 12px; color: var(--ink); background: var(--surface); box-shadow: 0 8px 14px oklch(0.25 0.03 158 / .08); }
@@ -402,6 +410,12 @@ tbody tr:last-child td { border-bottom: 0; }
 .row-action-menu-panel button { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; border: 0; border-radius: 6px; padding: 0 9px; color: var(--ink); background: transparent; font-size: 12px; font-weight: 650; text-align: left; }
 .row-action-menu-panel button:hover:not(:disabled) { background: var(--surface-muted); }
 .row-action-menu-panel button.danger { color: var(--danger); }
+.status-color-control { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 7px; min-height: 34px; padding: 3px 7px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink-muted); background: var(--surface-muted); font-size: 11px; font-weight: 800; white-space: nowrap; }
+.status-color-control input { width: 28px; height: 28px; border: 0; padding: 0; background: transparent; cursor: pointer; }
+.status-color-control input::-webkit-color-swatch-wrapper { padding: 0; }
+.status-color-control input::-webkit-color-swatch { border: 1px solid var(--line); border-radius: 6px; }
+.status-color-control strong { min-width: 58px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.status-color-swatch { width: 14px; height: 14px; border: 2px solid var(--surface); border-radius: 99px; box-shadow: 0 0 0 1px var(--line); }
 .component-type-editor .option-list { background: var(--surface); }
 .component-type-editor .option-list > .small.muted:first-child { display: block; padding: 10px 14px; border-bottom: 1px solid var(--line); background: oklch(0.975 0.01 155); line-height: 1.35; }
 .template-field-row { display: grid; grid-template-columns: 24px minmax(170px, 1fr) minmax(108px, 132px) 116px 36px; gap: 12px; align-items: center; min-height: 52px; padding: 8px 12px; border-bottom: 1px solid var(--line); transition: opacity 140ms ease-out, background-color 140ms ease-out, transform 140ms ease-out; }
@@ -649,6 +663,11 @@ tbody tr:last-child td { border-bottom: 0; }
   .option-list-head .button { align-self: start; min-height: 38px; }
   .custom-field-add-form { grid-template-columns: 1fr; }
   .custom-field-add-form .button { justify-self: start; }
+  .reference-settings-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) 44px; align-items: center; gap: 8px; }
+  .reference-settings-row > .drag-handle { grid-column: 1; grid-row: 1; }
+  .reference-settings-copy { grid-column: 2; grid-row: 1; }
+  .reference-settings-row > .row-action-menu { grid-column: 3; grid-row: 1 / span 2; justify-self: end; align-self: start; }
+  .reference-settings-row > .status-color-control { grid-column: 2 / -1; grid-row: 2; justify-self: start; }
   .user-settings-row { display: grid; gap: 12px; }
   .user-settings-controls { display: grid; justify-content: stretch; }
   .user-role-control, .user-role-control .select { width: 100%; }

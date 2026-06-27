@@ -11,10 +11,10 @@ const batangasSabang = requireLocation({ regionCode: "0400000000", provinceCode:
 export const defaultReferences: ReferenceData = {
   schoolDirectory: [],
   siteStatuses: [
-    { id: "status-scheduled", value: "scheduled", name: "Scheduled", active: true, order: 0 },
-    { id: "status-installed", value: "installed", name: "Installed", active: true, order: 1 },
-    { id: "status-issue", value: "issue", name: "Issue", active: true, order: 2 },
-    { id: "status-cancelled", value: "cancelled", name: "Cancelled", active: true, order: 3 },
+    { id: "status-scheduled", value: "scheduled", name: "Scheduled", active: true, order: 0, color: "#2f6fcb" },
+    { id: "status-installed", value: "installed", name: "Installed", active: true, order: 1, color: "#138a54" },
+    { id: "status-issue", value: "issue", name: "Issue", active: true, order: 2, color: "#b97812" },
+    { id: "status-cancelled", value: "cancelled", name: "Cancelled", active: true, order: 3, color: "#b85643" },
   ],
   contractors: [
     { id: "ctr-lighthouse", name: "Lighthouse Network Services", active: true },

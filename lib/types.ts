@@ -22,6 +22,7 @@ export type ReferenceOption = {
 
 export type StatusReferenceOption = ReferenceOption & {
   value: Status;
+  color?: string;
 };
 
 export type CustomFieldType = "text" | "number" | "date" | "dropdown";
