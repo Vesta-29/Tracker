@@ -448,7 +448,7 @@ export default function TrackerApp() {
   }, [canEdit, hasUnsavedReferences, page, saveReferences, setPage]);
 
   const filtered = useMemo(() => records.filter((r) =>
-    (!filters.search || `${r.id} ${r.siteName} ${r.legacyKitNumber ?? ""} ${r.barangay} ${r.municipality}`.toLowerCase().includes(filters.search.toLowerCase())) &&
+    (!filters.search || `${r.id} ${r.siteName} ${r.legacyKitNumber ?? ""} ${r.barangay} ${r.municipality} ${r.province} ${r.contractor}`.toLowerCase().includes(filters.search.toLowerCase())) &&
     (!filters.status || r.status === filters.status) &&
     (!filters.contractor || r.contractor === filters.contractor) &&
     (!filters.updatedBy || r.updatedBy === filters.updatedBy) &&
@@ -652,7 +652,24 @@ function DateRangeFilter({ from, to, minDate, maxDate, onChange, ariaLabel }: { 
   </div>;
 }
 
-function FilterBar({ records, refs, filters, setFilters, compact = false }: { records: Installation[]; refs: ReferenceData; filters: Filter; setFilters: (f: Filter) => void; compact?: boolean }) {
+function siteFilterLabels(filters: Filter, refs: ReferenceData, records: Installation[]) {
+  const activeLocationCount = [filters.islandGroup, filters.regionCode, filters.provinceCode, filters.municipalityCode, filters.barangayCode].filter(Boolean).length;
+  const dates = records.map((record) => record.installDate).filter(Boolean);
+  const minDate = dates.length ? dates.reduce((a, b) => (a < b ? a : b)) : "";
+  const maxDate = dates.length ? dates.reduce((a, b) => (a > b ? a : b)) : "";
+  const statusLabel = filters.status ? siteStatusLabel(filters.status as Status, refs) : "";
+  return [
+    filters.search && `Search: ${filters.search}`,
+    filters.status && `Status: ${statusLabel}`,
+    filters.contractor && `Contractor: ${filters.contractor}`,
+    filters.updatedBy && `Updated by: ${filters.updatedBy}`,
+    activeLocationCount && `${activeLocationCount} location ${activeLocationCount === 1 ? "filter" : "filters"}`,
+    (filters.from || filters.to) && `Installed: ${filters.from || minDate || "start"} to ${filters.to || maxDate || "end"}`,
+    filters.attention && (filters.attention === "missingName" ? "Queue: imported sites missing names" : "Queue: old kit numbers awaiting assignment"),
+  ].filter(Boolean) as string[];
+}
+
+function FilterBar({ records, refs, filters, setFilters, compact = false, matchingCount }: { records: Installation[]; refs: ReferenceData; filters: Filter; setFilters: (f: Filter) => void; compact?: boolean; matchingCount?: number }) {
   const [advanced, setAdvanced] = useState(false);
   const [searchDraft, setSearchDraft] = useState(filters.search);
   const [savedViews, setSavedViews] = useState<SavedSiteFilter[]>(() => {
@@ -673,8 +690,10 @@ function FilterBar({ records, refs, filters, setFilters, compact = false }: { re
   const municipalities = uniqueLocations(records.filter((record) => (!filters.islandGroup || record.islandGroup === filters.islandGroup) && (!filters.regionCode || record.regionCode === filters.regionCode) && (!filters.provinceCode || record.provinceCode === filters.provinceCode)).map((record) => ({ code: record.municipalityCode, name: record.municipality })));
   const barangays = uniqueLocations(records.filter((record) => record.barangayCode && (!filters.islandGroup || record.islandGroup === filters.islandGroup) && (!filters.regionCode || record.regionCode === filters.regionCode) && (!filters.provinceCode || record.provinceCode === filters.provinceCode) && (!filters.municipalityCode || record.municipalityCode === filters.municipalityCode)).map((record) => ({ code: record.barangayCode, name: record.barangay })));
   const activeLocationCount = [filters.islandGroup, filters.regionCode, filters.provinceCode, filters.municipalityCode, filters.barangayCode].filter(Boolean).length;
+  const secondaryFilterCount = [filters.contractor, filters.updatedBy, filters.from || filters.to ? "date" : "", activeLocationCount ? "location" : ""].filter(Boolean).length;
   const active = filters.search || filters.status || filters.contractor || filters.updatedBy || activeLocationCount || filters.from || filters.to || filters.attention;
-  useEffect(() => setSearchDraft(filters.search), [filters.search]);
+  const showAdvancedFilters = advanced || !compact;
+  const activeFilterLabels = siteFilterLabels(filters, refs, records);
   useEffect(() => {
     if (searchDraft === filters.search) return;
     const timer = window.setTimeout(() => setFilters({ ...filters, search: searchDraft }), 180);
@@ -697,7 +716,17 @@ function FilterBar({ records, refs, filters, setFilters, compact = false }: { re
   function applySavedView(id: string) {
     setSelectedSavedViewId(id);
     const view = savedViews.find((item) => item.id === id);
-    if (view) setFilters(sanitizeSiteFilter(view.filters, records, refs));
+    if (view) {
+      const next = sanitizeSiteFilter(view.filters, records, refs);
+      setSearchDraft(next.search);
+      setFilters(next);
+    }
+  }
+  function clearFilters() {
+    setSearchDraft("");
+    setSelectedSavedViewId("");
+    setSavingView(false);
+    setFilters(emptyFilter);
   }
   function deleteSelectedSavedView() {
     const view = savedViews.find((item) => item.id === selectedSavedViewId);
@@ -713,25 +742,27 @@ function FilterBar({ records, refs, filters, setFilters, compact = false }: { re
     <select className="select" aria-label="Filter sites by locality" value={filters.municipalityCode} onChange={(e) => setFilters({ ...filters, municipalityCode: e.target.value, barangayCode: "" })} disabled={!filters.provinceCode}><option value="">All localities</option>{municipalities.map((municipality) => <option value={municipality.code} key={municipality.code}>{municipality.name}</option>)}</select>
     <select className="select" aria-label="Filter sites by barangay" value={filters.barangayCode} onChange={(e) => setFilters({ ...filters, barangayCode: e.target.value })} disabled={!filters.municipalityCode}><option value="">All barangays</option>{barangays.map((barangay) => <option value={barangay.code} key={barangay.code}>{barangay.name}</option>)}</select>
   </>;
+  const advancedFilters = <div className="advanced-filter-grid">
+    {savedViews.length > 0 && <div className="saved-view-control"><select className="select saved-view-select" aria-label="Apply saved site filter" value={selectedSavedViewId} onChange={(event) => applySavedView(event.target.value)}><option value="">Saved views</option>{savedViews.map((view) => <option value={view.id} key={view.id}>{view.name}</option>)}</select><button type="button" className="button icon-button ghost saved-view-delete" disabled={!selectedSavedViewId} aria-label="Delete selected saved view" title="Delete selected saved view" onClick={deleteSelectedSavedView}><Trash2 size={15} /></button></div>}
+    <select className="select" aria-label="Filter sites by contractor" value={filters.contractor} onChange={(e) => setFilters({ ...filters, contractor: e.target.value })}><option value="">All contractors</option>{refs.contractors.map((c) => <option key={c.id}>{c.name}</option>)}</select>
+    <select className="select updated-by-filter" aria-label="Filter sites by updated by" value={filters.updatedBy} onChange={(e) => setFilters({ ...filters, updatedBy: e.target.value })}><option value="">Updated by</option>{updatedByOptions.map((name) => <option key={name}>{name}</option>)}</select>
+    <DateRangeFilter from={filters.from} to={filters.to} minDate={minDate} maxDate={maxDate} onChange={(range) => setFilters({ ...filters, ...range })} ariaLabel="Filter sites by installation date" />
+    {locationFilters}
+  </div>;
   return <div className="filter-stack">
-    <div className="toolbar filter-row">
+    <div className="toolbar filter-row filter-primary-row">
       <div className="input-wrap"><Search className="input-icon" size={17} /><input className="field search" data-site-search="true" aria-label="Search sites" value={searchDraft} onChange={(e) => setSearchDraft(e.target.value)} placeholder="Search site, school ID, or location" /></div>
-      <select className="select" aria-label="Filter sites by contractor" value={filters.contractor} onChange={(e) => setFilters({ ...filters, contractor: e.target.value })}><option value="">All contractors</option>{refs.contractors.map((c) => <option key={c.id}>{c.name}</option>)}</select>
-      <select className="select updated-by-filter" aria-label="Filter sites by updated by" value={filters.updatedBy} onChange={(e) => setFilters({ ...filters, updatedBy: e.target.value })}><option value="">Updated by</option>{updatedByOptions.map((name) => <option key={name}>{name}</option>)}</select>
-      {savedViews.length > 0 && <div className="saved-view-control"><select className="select saved-view-select" aria-label="Apply saved site filter" value={selectedSavedViewId} onChange={(event) => applySavedView(event.target.value)}><option value="">Saved views</option>{savedViews.map((view) => <option value={view.id} key={view.id}>{view.name}</option>)}</select><button type="button" className="button icon-button ghost saved-view-delete" disabled={!selectedSavedViewId} aria-label="Delete selected saved view" title="Delete selected saved view" onClick={deleteSelectedSavedView}><Trash2 size={15} /></button></div>}
-      {compact ? <button type="button" className={`button advanced-filter-trigger ${advanced || activeLocationCount ? "active" : ""}`} aria-expanded={advanced} onClick={() => setAdvanced((open) => !open)}>Advanced filters{activeLocationCount > 0 && <span>{activeLocationCount}</span>}<ChevronDown size={14} /></button> : locationFilters}
-      {active && <div className="filter-actions"><button type="button" className="button ghost filter-action-button" onClick={() => setSavingView((open) => !open)}>Save view</button><button type="button" className="button ghost filter-action-button filter-clear-button" onClick={() => setFilters(emptyFilter)}><X size={15} />Clear</button></div>}
+      <button type="button" className={`button advanced-filter-trigger ${advanced || secondaryFilterCount ? "active" : ""}`} aria-expanded={advanced} onClick={() => setAdvanced((open) => !open)}>More filters{secondaryFilterCount > 0 && <span>{secondaryFilterCount}</span>}<ChevronDown size={14} /></button>
     </div>
-    {savingView && <form className="toolbar saved-filter-row" onSubmit={saveCurrentView}><input className="field" value={viewName} onChange={(event) => setViewName(event.target.value)} placeholder="Name this filter view" autoFocus /><button className="button primary">Save view</button><button type="button" className="button ghost" onClick={() => { setSavingView(false); setViewName(""); }}>Cancel</button></form>}
-    {compact && advanced && <div className="toolbar filter-row advanced-filter-row">{locationFilters}</div>}
-    {filters.attention && <div className="active-queue-filter"><strong>{filters.attention === "missingName" ? "Queue: imported sites missing names" : "Queue: old kit numbers awaiting assignment"}</strong><button type="button" className="button ghost" onClick={() => setFilters({ ...filters, attention: "" })}><X size={14} />Clear queue</button></div>}
     <div className="status-filter-row" role="group" aria-label="Filter sites by status">
       <div className="status-filter-pills">
         <button type="button" className={`button status-filter-pill ${!filters.status ? "active" : ""}`} aria-pressed={!filters.status} onClick={() => setFilters({ ...filters, status: "" })}>All sites</button>
         {siteStatusOptions(refs, filters.status as Status).map((status) => <button type="button" className={`button status-filter-pill ${filters.status === status.value ? "active" : ""}`} aria-pressed={filters.status === status.value} key={status.value} onClick={() => setFilters({ ...filters, status: status.value })}><span className="status-dot" aria-hidden="true" style={{ background: siteStatusColor(status.value) }} />{status.name}</button>)}
       </div>
-      <DateRangeFilter from={filters.from} to={filters.to} minDate={minDate} maxDate={maxDate} onChange={(range) => setFilters({ ...filters, ...range })} ariaLabel="Filter sites by installation date" />
     </div>
+    {showAdvancedFilters && <div className="advanced-filter-row" aria-label="Secondary site filters">{advancedFilters}</div>}
+    {active && <div className="active-filter-summary"><div><strong>{matchingCount ?? records.length} matching {(matchingCount ?? records.length) === 1 ? "site" : "sites"}</strong><span>{activeFilterLabels.join(" | ")}</span></div><div className="filter-actions"><button type="button" className="button ghost filter-action-button" onClick={() => setSavingView((open) => !open)}>Save view</button><button type="button" className="button ghost filter-action-button filter-clear-button" onClick={clearFilters}><X size={15} />Clear all</button></div></div>}
+    {savingView && <form className="toolbar saved-filter-row" onSubmit={saveCurrentView}><input className="field" value={viewName} onChange={(event) => setViewName(event.target.value)} placeholder="Name this filter view" autoFocus /><button className="button primary">Save view</button><button type="button" className="button ghost" onClick={() => { setSavingView(false); setViewName(""); }}>Cancel</button></form>}
   </div>;
 }
 
@@ -744,7 +775,7 @@ function Dashboard({ records, allRecords, refs, filters, setFilters, setPage, ca
   return <>
     <div className="page-head"><div><p className="eyebrow">Overview</p><h1>Site dashboard</h1><p className="muted">Track site activity and review records that need follow-up.</p></div>{canEdit && <button className="button primary" onClick={() => setPage("new")}><Plus size={16} />Add site</button>}</div>
     <div className="stats status-stats" style={{ "--status-count": String(Math.max(counts.length, 1)) } as React.CSSProperties}>{counts.map(({ status, label, count }) => <button type="button" className="stat stat-button" key={status} onClick={() => { setFilters({ ...filters, status }); setPage("installations"); }}><span className="small muted">{label}</span><span className="stat-value">{count}<span className="status-dot" aria-hidden="true" style={{ background: siteStatusColor(status) }} /></span></button>)}</div>
-    <div style={{ marginBottom: 16 }}><FilterBar records={allRecords} refs={refs} filters={filters} setFilters={setFilters} compact /></div>
+    <div style={{ marginBottom: 16 }}><FilterBar records={allRecords} refs={refs} filters={filters} setFilters={setFilters} compact matchingCount={records.length} /></div>
     <div className="two-pane">
       <div className="panel"><div className="panel-head"><div><h2>Latest installations</h2><div className="small muted">{records.length} matching records</div></div><button className="button ghost" onClick={() => setPage("installations")}>View all sites</button></div><RecordsTable records={records.slice(0, 6)} /></div>
       <div className="panel"><div className="panel-head"><div><h2>By contractor</h2><div className="small muted">Current filtered distribution</div></div><BarChart3 size={18} className="muted" /></div>{contractors.length ? <div className="section contractor-distribution">{visibleContractors.map((c) => <div className="bar-row" key={c.name}><span className="small contractor-name" title={c.name}>{c.name}</span><span className="bar"><span style={{ width: `${(c.count/max)*100}%` }} /></span><strong>{c.count}</strong></div>)}{contractors.length > 5 && <button type="button" className="button ghost contractor-expand" onClick={() => setShowAllContractors((show) => !show)}>{showAllContractors ? "Show top contractors" : `Show all ${contractors.length} contractors`}</button>}</div> : <div className="empty contractor-empty"><BarChart3 size={22} /><p><strong>No contractor activity matches these filters.</strong></p><span>Adjust the filters to view the distribution.</span></div>}</div>
@@ -760,25 +791,26 @@ function Dashboard({ records, allRecords, refs, filters, setFilters, setPage, ca
 function Installations({ records, allRecords, refs, filters, setFilters, startEdit, setPage, canEdit, onBulkUpdate }: { records: Installation[]; allRecords: Installation[]; refs: ReferenceData; filters: Filter; setFilters: (f: Filter) => void; startEdit: (r: Installation) => void; setPage: (p: Page) => void; canEdit: boolean; onBulkUpdate: (ids: string[], changes: { status?: Status; contractor?: string }) => Promise<void> }) {
   return <>
     <div className="page-head"><div><p className="eyebrow">Registry</p><h1>Sites</h1><p className="muted">Find a site record and review its deployed equipment.</p></div><div className="toolbar"><button className="button" onClick={() => downloadCsv(records, refs)}><Download size={16} />Export CSV</button><button className="button" onClick={async () => downloadXlsx(await loadInstallationValidationRecords(), refs)}><FileSpreadsheet size={16} />Export XLSX</button>{canEdit && <button className="button primary" onClick={() => setPage("new")}><Plus size={16} />Add site</button>}</div></div>
-    <div className="shortcut-hint small muted">Shortcuts: Ctrl+K search, Alt+N new site, Ctrl+S save changes.</div>
-    <div style={{ marginBottom: 16 }}><FilterBar records={allRecords} refs={refs} filters={filters} setFilters={setFilters} compact /></div>
-    <div className="panel"><div className="panel-head"><strong>{records.length} records</strong></div><RecordsTable key={JSON.stringify(filters)} records={records} refs={refs} onSelect={startEdit} detailed canEdit={canEdit} onBulkUpdate={onBulkUpdate} /></div>
+    <div className="shortcut-hint small muted">Shortcuts: Ctrl+K search, Alt+N new site.</div>
+    <div style={{ marginBottom: 16 }}><FilterBar records={allRecords} refs={refs} filters={filters} setFilters={setFilters} compact matchingCount={records.length} /></div>
+    <div className="panel"><div className="panel-head"><strong>{records.length} records</strong></div><RecordsTable records={records} refs={refs} filters={filters} onClearFilters={() => setFilters(emptyFilter)} onSelect={startEdit} detailed canEdit={canEdit} onBulkUpdate={onBulkUpdate} /></div>
   </>;
 }
 
 type SiteSortKey = "siteName" | "id" | "siteCode" | "islandGroup" | "location" | "unitType" | "contractor" | "installDate" | "status" | "equipment" | "updatedBy";
-function SiteSortHeader({ label, column, sortable, sort, onSort }: { label: string; column: SiteSortKey; sortable: boolean; sort?: { key: SiteSortKey; direction: "asc" | "desc" }; onSort: (key: SiteSortKey) => void }) {
-  if (!sortable) return <th>{label}</th>;
+function SiteSortHeader({ label, column, sortable, sort, onSort, className }: { label: string; column: SiteSortKey; sortable: boolean; sort?: { key: SiteSortKey; direction: "asc" | "desc" }; onSort: (key: SiteSortKey) => void; className?: string }) {
+  if (!sortable) return <th className={className}>{label}</th>;
   const active = sort?.key === column;
-  return <th aria-sort={active ? sort.direction === "asc" ? "ascending" : "descending" : "none"}><button type="button" className={`table-sort ${active ? "active" : ""}`} onClick={() => onSort(column)}>{label}{active && sort.direction === "desc" ? <ArrowDownAZ size={14} /> : <ArrowUpAZ size={14} />}</button></th>;
+  return <th className={className} aria-sort={active ? sort.direction === "asc" ? "ascending" : "descending" : "none"}><button type="button" className={`table-sort ${active ? "active" : ""}`} onClick={() => onSort(column)}>{label}{active && sort.direction === "desc" ? <ArrowDownAZ size={14} /> : <ArrowUpAZ size={14} />}</button></th>;
 }
-function RecordsTable({ records, refs, onSelect, detailed = false, canEdit = true, onBulkUpdate }: { records: Installation[]; refs?: ReferenceData; onSelect?: (r: Installation) => void; detailed?: boolean; canEdit?: boolean; onBulkUpdate?: (ids: string[], changes: { status?: Status; contractor?: string }) => Promise<void> }) {
+function RecordsTable({ records, refs, filters, onClearFilters, onSelect, detailed = false, canEdit = true, onBulkUpdate }: { records: Installation[]; refs?: ReferenceData; filters?: Filter; onClearFilters?: () => void; onSelect?: (r: Installation) => void; detailed?: boolean; canEdit?: boolean; onBulkUpdate?: (ids: string[], changes: { status?: Status; contractor?: string }) => Promise<void> }) {
   const [sort, setSort] = useState<{ key: SiteSortKey; direction: "asc" | "desc" }>();
   const [page, setPage] = useState(1);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkStatus, setBulkStatus] = useState("");
   const [bulkContractor, setBulkContractor] = useState("");
   const [bulkSaving, setBulkSaving] = useState(false);
+  const [bulkReview, setBulkReview] = useState(false);
   const sortable = detailed;
   const pageSize = 20;
   const sortedRecords = useMemo(() => {
@@ -799,20 +831,25 @@ function RecordsTable({ records, refs, onSelect, detailed = false, canEdit = tru
   const validSelectedIds = selectedIds.filter((id) => records.some((record) => record.id === id));
   const visibleIds = visibleRecords.map((record) => record.id);
   const selectedRecords = sortedRecords.filter((record) => validSelectedIds.includes(record.id));
+  const selectedUpdatableRecords = selectedRecords.filter((record) => record.dbId);
   const visibleSelected = visibleIds.length > 0 && visibleIds.every((id) => validSelectedIds.includes(id));
   function toggleSort(key: SiteSortKey) { if (!sortable) return; setPage(1); setSort((current) => current?.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: "asc" }); }
-  function toggleVisibleRows(checked: boolean) { setSelectedIds((current) => checked ? Array.from(new Set([...current, ...visibleIds])) : current.filter((id) => !visibleIds.includes(id))); }
+  function toggleVisibleRows(checked: boolean) { setBulkReview(false); setSelectedIds((current) => checked ? Array.from(new Set([...current, ...visibleIds])) : current.filter((id) => !visibleIds.includes(id))); }
   async function applyBulkUpdate() {
-    if (!onBulkUpdate || !selectedRecords.length || (!bulkStatus && !bulkContractor)) return;
+    if (!onBulkUpdate || !selectedUpdatableRecords.length || (!bulkStatus && !bulkContractor)) return;
+    if (!bulkReview) { setBulkReview(true); return; }
     setBulkSaving(true);
     try {
-      await onBulkUpdate(selectedRecords.map((record) => record.dbId).filter(Boolean) as string[], { status: bulkStatus as Status || undefined, contractor: bulkContractor || undefined });
-      setSelectedIds([]); setBulkStatus(""); setBulkContractor("");
+      await onBulkUpdate(selectedUpdatableRecords.map((record) => record.dbId) as string[], { status: bulkStatus as Status || undefined, contractor: bulkContractor || undefined });
+      setSelectedIds([]); setBulkStatus(""); setBulkContractor(""); setBulkReview(false);
     } catch { } finally { setBulkSaving(false); }
   }
-  if (!records.length) return <div className="empty"><ClipboardList size={25} /><p><strong>No sites match these filters.</strong></p><span>{canEdit ? "Clear a filter or add a site record." : "Clear a filter or ask a staff user to add a site record."}</span></div>;
-  const sortHeader = (label: string, column: SiteSortKey) => <SiteSortHeader label={label} column={column} sortable={sortable} sort={sort} onSort={toggleSort} />;
-  return <>{selectable && selectedRecords.length > 0 && <div className="bulk-action-bar" role="region" aria-label="Bulk site actions"><strong>{selectedRecords.length} selected</strong><select className="select" aria-label="Bulk update status" value={bulkStatus} onChange={(event) => setBulkStatus(event.target.value)}><option value="">Keep status</option>{siteStatusOptions(refs).map((status) => <option value={status.value} key={status.value}>{status.name}</option>)}</select><select className="select" aria-label="Bulk update contractor" value={bulkContractor} onChange={(event) => setBulkContractor(event.target.value)}><option value="">Keep contractor</option>{(refs?.contractors ?? []).filter((contractor) => contractor.active || selectedRecords.some((record) => record.contractor === contractor.name)).map((contractor) => <option key={contractor.id}>{contractor.name}</option>)}</select><button type="button" className="button primary" disabled={bulkSaving || (!bulkStatus && !bulkContractor)} onClick={() => void applyBulkUpdate()}>{bulkSaving ? "Updating..." : "Apply changes"}</button><button type="button" className="button ghost" disabled={bulkSaving} onClick={() => setSelectedIds([])}>Clear selection</button></div>}<div className={`table-wrap ${detailed ? "sites-table-wrap" : ""}`}><table className={detailed ? "sites-table" : undefined}><thead><tr>{selectable && <th><input type="checkbox" aria-label="Select visible site rows" checked={visibleSelected} onChange={(event) => toggleVisibleRows(event.target.checked)} /></th>}{sortHeader("Site name", "siteName")}{sortHeader("School ID", "id")}{detailed && sortHeader("Site Code", "siteCode")}{detailed && sortHeader("Island group", "islandGroup")}{sortHeader("Location", "location")}{sortHeader("Installation date", "installDate")}{sortHeader("Status", "status")}{detailed && sortHeader("Updated by", "updatedBy")}{sortHeader("Contractor", "contractor")}{onSelect && <th><span className="sr-only">Actions</span></th>}</tr></thead><tbody>{visibleRecords.map((r) => <tr key={r.id} role={onSelect ? "button" : undefined} tabIndex={onSelect ? 0 : undefined} aria-label={onSelect ? `Open site ${r.siteName || r.id}` : undefined} onClick={() => { if (!hasActiveTextSelection()) onSelect?.(r); }} onKeyDown={(event) => onSelect && handleRowKeyboard(event, () => onSelect(r))} style={{ cursor: onSelect ? "pointer" : "default" }}>{selectable && <td onClick={(event) => event.stopPropagation()}><input type="checkbox" aria-label={`Select ${r.siteName || r.id}`} checked={validSelectedIds.includes(r.id)} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...current, r.id] : current.filter((id) => id !== r.id))} /></td>}<td>{r.siteName || <span className="pill issue">Site name required</span>}</td><td><strong>{r.id}</strong></td>{detailed && <td>{projectSiteCode(r)}</td>}{detailed && <td>{r.islandGroup || "None"}</td>}<td>{locationLabel(r)}</td><td>{niceDate(r.installDate)}</td><td><StatusPill status={r.status} refs={refs} /></td>{detailed && <td>{r.updatedBy}</td>}<td>{r.contractor}</td>{onSelect && <td><button type="button" className="button icon-button ghost" aria-label={`View ${r.siteName || r.id}`} onClick={(event) => { event.stopPropagation(); onSelect(r); }}><ChevronRight size={16} /></button></td>}</tr>)}</tbody></table></div>{detailed && <div className="pagination"><span className="small muted">Showing {firstVisible}-{lastVisible} of {sortedRecords.length} records | {pageSize} rows per page</span><div className="toolbar"><button type="button" className="button icon-button" aria-label="Previous page" disabled={currentPage === 1} onClick={() => setPage((current) => Math.max(1, current - 1))}><ChevronLeft size={16} /></button><span className="pagination-page small">Page {currentPage} of {pageCount}</span><button type="button" className="button icon-button" aria-label="Next page" disabled={currentPage === pageCount} onClick={() => setPage((current) => Math.min(pageCount, current + 1))}><ChevronRight size={16} /></button></div></div>}</>;
+  const filterLabels = filters && refs ? siteFilterLabels(filters, refs, records) : [];
+  if (!records.length) return <div className="empty site-list-empty"><ClipboardList size={25} /><p><strong>No sites match these filters.</strong></p>{filterLabels.length > 0 && <span className="empty-filter-summary">{filterLabels.join(" | ")}</span>}<div className="empty-actions">{onClearFilters && <button type="button" className="button" onClick={onClearFilters}><X size={15} />Clear all filters</button>}{canEdit && <span>Add a site if this record has not been encoded yet.</span>}</div></div>;
+  const sortHeader = (label: string, column: SiteSortKey, className?: string) => <SiteSortHeader label={label} column={column} sortable={sortable} sort={sort} onSort={toggleSort} className={className} />;
+  const bulkChangeSummary = [bulkStatus && `Status to ${siteStatusLabel(bulkStatus as Status, refs)}`, bulkContractor && `Contractor to ${bulkContractor}`].filter(Boolean).join(" and ");
+  const selectionNote = selectedUpdatableRecords.length < selectedRecords.length ? `${selectedUpdatableRecords.length} can be updated` : "";
+  return <>{selectable && selectedRecords.length > 0 && <div className="bulk-action-bar" role="region" aria-label="Bulk site actions"><div className="bulk-action-summary"><strong>{selectedRecords.length} selected</strong>{selectionNote && <span>{selectionNote}</span>}{bulkReview && bulkChangeSummary && <span>Confirm: change {selectedUpdatableRecords.length} {selectedUpdatableRecords.length === 1 ? "site" : "sites"}: {bulkChangeSummary}.</span>}</div><select className="select" aria-label="Bulk update status" value={bulkStatus} onChange={(event) => { setBulkReview(false); setBulkStatus(event.target.value); }}><option value="">Keep status</option>{siteStatusOptions(refs).map((status) => <option value={status.value} key={status.value}>{status.name}</option>)}</select><select className="select" aria-label="Bulk update contractor" value={bulkContractor} onChange={(event) => { setBulkReview(false); setBulkContractor(event.target.value); }}><option value="">Keep contractor</option>{(refs?.contractors ?? []).filter((contractor) => contractor.active || selectedRecords.some((record) => record.contractor === contractor.name)).map((contractor) => <option key={contractor.id}>{contractor.name}</option>)}</select><button type="button" className="button primary" disabled={bulkSaving || !selectedUpdatableRecords.length || (!bulkStatus && !bulkContractor)} onClick={() => void applyBulkUpdate()}>{bulkSaving ? "Updating..." : bulkReview ? "Confirm update" : "Review changes"}</button><button type="button" className="button ghost" disabled={bulkSaving} onClick={() => { setBulkReview(false); setSelectedIds([]); }}>Clear selection</button></div>}<div className={`table-wrap ${detailed ? "sites-table-wrap" : ""}`}><table className={detailed ? "sites-table" : undefined}><thead><tr>{selectable && <th className="site-select-column"><input type="checkbox" aria-label="Select visible site rows" checked={visibleSelected} onChange={(event) => toggleVisibleRows(event.target.checked)} /></th>}{sortHeader("Site name", "siteName", "site-identity-column")}{sortHeader("School ID", "id", "site-id-column")}{detailed && sortHeader("Site Code", "siteCode", "site-code-column secondary-site-column")}{detailed && sortHeader("Island group", "islandGroup", "island-column secondary-site-column")}{sortHeader("Location", "location", "site-location-column")}{sortHeader("Installation date", "installDate", "install-date-column")}{sortHeader("Status", "status", "site-status-column")}{detailed && sortHeader("Updated by", "updatedBy", "updated-by-column secondary-site-column")}{sortHeader("Contractor", "contractor", "site-contractor-column")}{onSelect && <th className="site-actions-column"><span className="sr-only">Actions</span></th>}</tr></thead><tbody>{visibleRecords.map((r) => <tr key={r.id} role={onSelect ? "button" : undefined} tabIndex={onSelect ? 0 : undefined} aria-label={onSelect ? `Open site ${r.siteName || r.id}` : undefined} onClick={() => { if (!hasActiveTextSelection()) onSelect?.(r); }} onKeyDown={(event) => onSelect && handleRowKeyboard(event, () => onSelect(r))} style={{ cursor: onSelect ? "pointer" : "default" }}>{selectable && <td className="site-select-column" onClick={(event) => event.stopPropagation()}><input type="checkbox" aria-label={`Select ${r.siteName || r.id}`} checked={validSelectedIds.includes(r.id)} onChange={(event) => { setBulkReview(false); setSelectedIds((current) => event.target.checked ? [...current, r.id] : current.filter((id) => id !== r.id)); }} /></td>}<td className="site-identity-column">{r.siteName || <span className="pill issue">Site name required</span>}</td><td className="site-id-column"><strong>{r.id}</strong></td>{detailed && <td className="site-code-column secondary-site-column">{projectSiteCode(r)}</td>}{detailed && <td className="island-column secondary-site-column">{r.islandGroup || "None"}</td>}<td className="site-location-column">{locationLabel(r)}</td><td className="install-date-column">{niceDate(r.installDate)}</td><td className="site-status-column"><StatusPill status={r.status} refs={refs} /></td>{detailed && <td className="updated-by-column secondary-site-column">{r.updatedBy}</td>}<td className="site-contractor-column">{r.contractor}</td>{onSelect && <td className="site-actions-column"><button type="button" className="button icon-button ghost" aria-label={`View ${r.siteName || r.id}`} onClick={(event) => { event.stopPropagation(); onSelect(r); }}><ChevronRight size={16} /></button></td>}</tr>)}</tbody></table></div>{detailed && <div className="pagination"><span className="small muted">Showing {firstVisible}-{lastVisible} of {sortedRecords.length} records | {pageSize} rows per page</span><div className="toolbar"><button type="button" className="button icon-button" aria-label="Previous page" disabled={currentPage === 1} onClick={() => setPage((current) => Math.max(1, current - 1))}><ChevronLeft size={16} /></button><span className="pagination-page small">Page {currentPage} of {pageCount}</span><button type="button" className="button icon-button" aria-label="Next page" disabled={currentPage === pageCount} onClick={() => setPage((current) => Math.min(pageCount, current + 1))}><ChevronRight size={16} /></button></div></div>}</>;
 }
 
 function ServiceVisitsPage({ records, refs, actorName, onSave, canEdit, routeReady }: { records: Installation[]; refs: ReferenceData; actorName: string; onSave: (installationId: string, visit: ServiceVisit, components: Component[]) => Promise<boolean | undefined>; canEdit: boolean; routeReady: boolean }) {
@@ -1308,21 +1345,33 @@ function InstallationForm({
   const schoolIdDescriptions = [duplicateSchoolId ? "school-id-duplicate-error" : "", triedSubmit && !schoolId ? "school-id-required-error" : ""].filter(Boolean).join(" ") || undefined;
   const locationDescription = triedSubmit && missingLocation ? "location-required-error" : undefined;
   const requiredProgress = [
-    { label: "Site details", complete: Boolean(record.siteName && schoolId && record.unitType && record.contractor && record.installDate && !duplicate && !duplicateSchoolId) },
-    { label: "Location", complete: !missingLocation && !locationError },
-    { label: "Equipment", complete: !missingComponentValue && !invalidMac && !invalidInteger && !(duplicateMac && !duplicateMac.duplicateMacAcknowledged) },
-    ...(requiredCustomFields.length ? [{ label: "Required extras", complete: requiredCustomComplete }] : []),
+    { label: "Site details", sectionId: "site-details-section", complete: Boolean(record.siteName && schoolId && record.unitType && record.contractor && record.installDate && !duplicate && !duplicateSchoolId) },
+    { label: "Location", sectionId: "site-location-section", complete: !missingLocation && !locationError },
+    ...(requiredCustomFields.length ? [{ label: "Required extras", sectionId: "required-additional-section", complete: requiredCustomComplete }] : []),
+    { label: "Equipment", sectionId: "equipment-section", complete: !missingComponentValue && !invalidMac && !invalidInteger && !(duplicateMac && !duplicateMac.duplicateMacAcknowledged) },
   ];
   const requiredCompleteCount = requiredProgress.filter((item) => item.complete).length;
   const optionalFieldCount = optionalCustomFields.length;
   const optionalValueCount = optionalCustomFields.filter((field) => (record.customValues ?? {})[field.id]?.trim()).length;
   const beneficiaryContacts = beneficiaryContactList(record);
+  function sectionForTarget(target: string) {
+    if (target.endsWith("-section")) return target;
+    if (target.startsWith("custom-field-")) return "required-additional-section";
+    if (target.startsWith("equipment-") || target === "duplicate-mac-acknowledgement") return "equipment-section";
+    if (["island-group-input", "region-input", "province-input", "locality-input", "barangay-input", "latitude-input", "longitude-input", "contractor-address-input"].includes(target)) return "site-location-section";
+    return "site-details-section";
+  }
+  const firstValidationItem = validationItems[0];
+  const nextRequiredProgress = requiredProgress.find((item) => !item.complete);
+  const nextRequiredTarget = firstValidationItem?.target ?? nextRequiredProgress?.sectionId ?? "";
+  const nextRequiredSectionId = nextRequiredTarget ? sectionForTarget(nextRequiredTarget) : "";
+  const nextRequiredCopy = firstValidationItem?.text ?? (nextRequiredProgress ? `Complete ${nextRequiredProgress.label.toLowerCase()}.` : "Ready to save.");
   const sectionLinks = [
-    { id: "site-details-section", label: "Details", complete: requiredProgress.find((item) => item.label === "Site details")?.complete },
-    { id: "site-location-section", label: "Location", complete: requiredProgress.find((item) => item.label === "Location")?.complete },
-    ...(requiredCustomFields.length ? [{ id: "required-additional-section", label: "Required extras", complete: requiredCustomComplete }] : []),
+    { id: "site-details-section", label: "Details", complete: requiredProgress.find((item) => item.label === "Site details")?.complete, required: true },
+    { id: "site-location-section", label: "Location", complete: requiredProgress.find((item) => item.label === "Location")?.complete, required: true },
+    ...(requiredCustomFields.length ? [{ id: "required-additional-section", label: "Required extras", complete: requiredCustomComplete, required: true }] : []),
     ...(optionalCustomFields.length ? [{ id: "optional-additional-section", label: "Optional extras", complete: optionalValueCount === optionalFieldCount }] : []),
-    { id: "equipment-section", label: "Equipment", complete: requiredProgress.find((item) => item.label === "Equipment")?.complete },
+    { id: "equipment-section", label: "Equipment", complete: requiredProgress.find((item) => item.label === "Equipment")?.complete, required: true },
     { id: "beneficiary-contact-section", label: "Contacts", complete: beneficiaryContacts.some(contactHasValue) },
     { id: "remarks-photos-section", label: "Remarks", complete: Boolean(record.remarks || record.photos.length) },
   ];
@@ -1336,6 +1385,10 @@ function InstallationForm({
     const target = document.getElementById(id);
     target?.scrollIntoView({ behavior: "smooth", block: "center" });
     if (target instanceof HTMLElement) target.focus({ preventScroll: true });
+  }
+  function goToNextRequired() {
+    if (!nextRequiredTarget) return;
+    focusValidationTarget(nextRequiredTarget);
   }
   function focusExtractionTarget(id: string) {
     if (id === "remarks-input") setShowNotesPhotos(true);
@@ -1495,8 +1548,8 @@ function InstallationForm({
     <div className="tabs" role="tablist" aria-label="Site record sections" onKeyDown={handleTabKeyDown}><button type="button" id="site-tab-overview" role="tab" aria-controls="site-panel-overview" aria-selected={tab === "overview"} tabIndex={tab === "overview" ? 0 : -1} className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}>Overview</button><button type="button" id="site-tab-visits" role="tab" aria-controls="site-panel-visits" aria-selected={tab === "visits"} tabIndex={tab === "visits" ? 0 : -1} className={tab === "visits" ? "active" : ""} onClick={() => void openVisits()}>Service visits {visitsLoaded && <span>{serviceVisits.length}</span>}</button><button type="button" id="site-tab-audit" role="tab" aria-controls="site-panel-audit" aria-selected={tab === "audit"} tabIndex={tab === "audit" ? 0 : -1} className={tab === "audit" ? "active" : ""} onClick={() => void openAudit()}>Change log {auditLoaded && <span>{auditEvents.length}</span>}</button></div>
     {triedSubmit && hasValidationError && <div className="notice validation-notice validation-summary inline" role="alert" tabIndex={-1} ref={validationSummaryRef}><strong>Check the highlighted site details before saving.</strong><ul>{validationItems.map((item) => <li key={item.id}><a href={`#${item.target}`} onClick={(event) => { event.preventDefault(); focusValidationTarget(item.target); }}>{item.text}</a></li>)}</ul></div>}
     {tab === "overview" && <div className="site-workflow-bar" aria-label="Overview workflow">
-      <div className="site-workflow-summary"><strong>{record.siteName.trim() || (initial ? "Site name required" : "New site record")}</strong><span className="small muted">{record.id.trim() ? `School ID: ${record.id.trim()} | ` : ""}{requiredCompleteCount} of {requiredProgress.length} required ready | {readOnly ? "Review mode" : isDirty ? "Unsaved changes" : "Saved"}</span></div>
-      <nav className="site-section-nav" aria-label="Overview sections">{sectionLinks.map((link) => <button type="button" className={`site-section-nav-button ${link.complete ? "complete" : ""}`} key={link.id} onClick={() => scrollToSection(link.id)}>{link.complete ? <CheckCircle2 size={13} /> : <CircleDot size={13} />}{link.label}</button>)}</nav>
+      <div className="site-workflow-summary"><strong>{record.siteName.trim() || (initial ? "Site name required" : "New site record")}</strong><span className="small muted">{record.id.trim() ? `School ID: ${record.id.trim()} | ` : ""}{requiredCompleteCount} of {requiredProgress.length} required ready | {readOnly ? "Review mode" : isDirty ? "Unsaved changes" : "Saved"}</span>{!readOnly && hasValidationError && <button type="button" className="site-next-step needs-work" onClick={goToNextRequired}><span>Next required</span><strong>{nextRequiredCopy}</strong></button>}</div>
+      <nav className="site-section-nav" aria-label="Overview sections">{sectionLinks.map((link) => { const needsWork = Boolean(link.required && !link.complete); const next = link.id === nextRequiredSectionId; return <button type="button" className={`site-section-nav-button ${link.complete ? "complete" : ""} ${needsWork ? "needs-work" : ""} ${next ? "next" : ""}`} aria-current={next ? "step" : undefined} key={link.id} onClick={() => scrollToSection(link.id)}>{link.complete ? <CheckCircle2 size={13} /> : next ? <AlertTriangle size={13} /> : <CircleDot size={13} />}{link.label}{needsWork && <span className="site-section-count">Required</span>}</button>; })}</nav>
       {!readOnly && <button className="button primary site-workflow-save" disabled={!isDirty || saving || deleting}>{saving ? "Saving..." : initial ? "Save changes" : "Save site"}</button>}
     </div>}
     {tab === "overview" && <fieldset id="site-panel-overview" aria-labelledby="site-tab-overview" className="panel site-fields editing" role="tabpanel" disabled={readOnly}>
