@@ -1076,7 +1076,7 @@ function InstallationForm({
   const [excelCopyState, setExcelCopyState] = useState<"idle" | "first" | "last" | "error">("idle");
   const [latLongCopyState, setLatLongCopyState] = useState<"idle" | "copied" | "error">("idle");
   const [plusCodeCopyState, setPlusCodeCopyState] = useState<"idle" | "copied" | "error">("idle");
-  const [siteDetailsCopyState, setSiteDetailsCopyState] = useState<"idle" | "starlink" | "project" | "error">("idle");
+  const [siteDetailsCopyState, setSiteDetailsCopyState] = useState<"idle" | "project" | "error">("idle");
   const [copiedEquipmentField, setCopiedEquipmentField] = useState("");
   const [extractionHighlights, setExtractionHighlights] = useState<string[]>([]);
   const validationSummaryRef = useRef<HTMLDivElement>(null);
@@ -1497,15 +1497,6 @@ function InstallationForm({
       setPlusCodeCopyState("error");
     }
   }
-  async function copyStarlinkLabel() {
-    try {
-      await navigator.clipboard.writeText(["ELRN", record.id.trim(), record.siteName.trim()].join("-"));
-      setSiteDetailsCopyState("starlink");
-      window.setTimeout(() => setSiteDetailsCopyState("idle"), 2400);
-    } catch {
-      setSiteDetailsCopyState("error");
-    }
-  }
   async function copyProjectName() {
     try {
       await navigator.clipboard.writeText(`${projectSiteCode(record)}_${record.siteName.trim()}`);
@@ -1574,7 +1565,6 @@ function InstallationForm({
   }
   const excelSiteCopyLabel = excelCopyState === "first" ? "Copied Excel site details" : excelCopyState === "error" ? "Excel copy failed" : "Excel site details";
   const excelActivationCopyLabel = excelCopyState === "last" ? "Copied Excel activation columns" : excelCopyState === "error" ? "Excel copy failed" : "Excel activation columns";
-  const starlinkCopyLabel = siteDetailsCopyState === "starlink" ? "Copied Starlink label" : siteDetailsCopyState === "error" ? "Label copy failed" : "Starlink label";
   const projectCopyLabel = siteDetailsCopyState === "project" ? "Copied project name" : siteDetailsCopyState === "error" ? "Label copy failed" : "Project name";
   const coordinateCopyLabel = latLongCopyState === "copied" ? "Copied latitude, longitude" : latLongCopyState === "error" ? "Coordinate copy failed" : "Latitude, longitude";
   const plusCodeCopyLabel = plusCodeCopyState === "copied" ? "Copied Plus Code" : plusCodeCopyState === "error" ? "Plus Code copy failed" : "Plus Code";
@@ -1603,7 +1593,7 @@ function InstallationForm({
         {!pastePanelOpen && extractionSummary && <div className="paste-report-summary" role="status" aria-live="polite"><button type="button" className="button" onClick={() => setPastePanelOpen(true)}>Reopen report</button>{extractionSummary.applied.length > 0 && <div className="extraction-review" aria-label="Fields filled from activation report"><div className="extraction-review-head"><ClipboardList size={15} /><strong>Review filled fields</strong></div><div className="extraction-review-list">{extractionSummary.applied.map((item) => <button type="button" className="extraction-review-item" key={item.key} onClick={() => focusExtractionTarget(item.target)}><span>{item.label}</span><strong>{item.value}</strong></button>)}</div></div>}{extractionSummary.warnings.length > 0 && <ul aria-label="Activation report warnings">{extractionSummary.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}{extractionSummary.diagnostics.length > 0 && <div className="small muted paste-report-diagnostics">{extractionSummary.diagnostics.join(" ")}</div>}</div>}
       </section>}
       {initial && <section className="section ownership-grid" aria-label="Saved record metadata"><div><span className="small muted">Created by</span><strong>{record.createdBy}</strong></div><div><span className="small muted">Created</span><strong>{niceDateTime(record.createdAt)}</strong></div><div><span className="small muted">Updated by</span><strong>{record.updatedBy}</strong></div><div><span className="small muted">Last saved</span><strong>{niceDateTime(record.updatedAt)}</strong></div></section>}
-      <section id="site-details-section" className="section site-details-polish site-details-guided"><div className="section-title"><div><h2>Site details</h2><span className="small muted">Identity, ownership, and current installation state</span></div><div className="toolbar section-copy-actions" aria-label="Copy site labels"><span>Labels</span><button type="button" className="button" disabled={saving || deleting || !record.id.trim() || !record.siteName.trim()} onClick={() => void copyStarlinkLabel()} title="Copy ELRN Starlink label"><ClipboardCopy size={15} />{starlinkCopyLabel}</button><button type="button" className="button" disabled={saving || deleting || !record.id.trim() || !record.siteName.trim()} onClick={() => void copyProjectName()} title="Copy ELRN project name"><ClipboardCopy size={15} />{projectCopyLabel}</button></div></div><div className="grid-3">
+      <section id="site-details-section" className="section site-details-polish site-details-guided"><div className="section-title"><div><h2>Site details</h2><span className="small muted">Identity, ownership, and current installation state</span></div><div className="toolbar section-copy-actions" aria-label="Copy site labels"><span>Labels</span><button type="button" className="button" disabled={saving || deleting || !record.id.trim() || !record.siteName.trim()} onClick={() => void copyProjectName()} title="Copy ELRN project name"><ClipboardCopy size={15} />{projectCopyLabel}</button></div></div><div className="grid-3">
         <label className="school-lookup">Site name<input id="site-name-input" required className={`field${extractionHighlight("siteName")}`} role="combobox" aria-autocomplete="list" aria-expanded={schoolLookupOpen && schoolMatches.length > 0} aria-controls="school-directory-results" aria-invalid={Boolean((triedSubmit && missingSiteName) || duplicate) || undefined} aria-describedby={siteNameDescriptions} value={record.siteName} onFocus={() => setSchoolLookupOpen(true)} onBlur={() => window.setTimeout(() => setSchoolLookupOpen(false), 120)} onKeyDown={schoolLookupKeyDown} onChange={(e) => { patch({ siteName: e.target.value }); setSchoolLookupOpen(true); setSchoolLookupNotice(""); }} placeholder="Search or enter a school name" />{schoolLookupOpen && record.siteName.trim().length >= 2 && schoolMatches.length > 0 && <div className="school-lookup-results" id="school-directory-results" role="listbox">{schoolMatches.map((entry, index) => <button type="button" className={`school-lookup-option ${index === schoolLookupIndex ? "active" : ""}`} role="option" aria-selected={index === schoolLookupIndex} key={entry.id} onMouseDown={(event) => event.preventDefault()} onClick={() => selectDirectorySchool(entry)}><span className="school-lookup-name">{entry.schoolName}</span><span className="school-lookup-province">{entry.province || "Province unavailable"}</span></button>)}</div>}</label>
         <label>School ID<input id="school-id-input" required className={`field${extractionHighlight("id")}`} aria-invalid={Boolean((triedSubmit && !schoolId) || duplicateSchoolId) || undefined} aria-describedby={schoolIdDescriptions} value={record.id} onChange={(e) => patch({ id: e.target.value })} placeholder="School ID" /></label>
         <label>Site Code<input id="site-code-input" className="field" value={record.id.trim() ? projectSiteCode(record) : ""} placeholder="Autofills from School ID" readOnly /></label>
