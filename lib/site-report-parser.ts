@@ -45,7 +45,7 @@ const aliases: Partial<Record<SiteReportField, readonly string[]>> = {
   contractor: ["Company Name", "MSP"],
   installerTeamLead: ["Team Lead Name", "MSP Installer/Team Lead", "Installer Team Lead", "Team Lead"],
   installDate: ["Date Installed", "Installation Date", "Date"],
-  beneficiaryName: ["Beneficiary", "Contact Person", "School Contact", "Primary Contact"],
+  beneficiaryName: ["Contact Person (School Head/ICT Teacher)", "Contact Person", "School Contact", "Primary Contact", "Beneficiary"],
   beneficiaryRole: ["Beneficiary Role", "Contact Person Position", "Position", "Role"],
   beneficiaryPhone: ["Active Contact Number", "Contact Number", "Mobile Number", "Phone Number"],
   remarks: ["Remarks", "Notes"],
@@ -85,6 +85,22 @@ function labeledValue(text: string, field: SiteReportField) {
     if (!raw) continue;
     if (line.label && Object.values(aliases).some((group) => labelMatches(line.label, group ?? []))) break;
     return { value: raw, index: match.index };
+  }
+  return undefined;
+}
+
+function labeledValueByAliasPriority(text: string, field: SiteReportField) {
+  const lines = splitLines(text);
+  for (const candidate of aliases[field] ?? []) {
+    const match = lines.find((line) => line.label && labelMatches(line.label, [candidate]));
+    if (!match) continue;
+    if (match.value) return { value: match.value, index: match.index };
+    for (const line of lines.slice(match.index + 1)) {
+      const raw = line.raw.trim();
+      if (!raw) continue;
+      if (line.label && Object.values(aliases).some((group) => labelMatches(line.label, group ?? []))) break;
+      return { value: raw, index: match.index };
+    }
   }
   return undefined;
 }
@@ -168,7 +184,7 @@ function coordinateSections(text: string) {
 
 function beneficiaryBlock(text: string) {
   const lines = splitLines(text);
-  const nameMatch = labeledValue(text, "beneficiaryName");
+  const nameMatch = labeledValueByAliasPriority(text, "beneficiaryName");
   const explicitRole = labeledValue(text, "beneficiaryRole")?.value ?? "";
   const explicitPhone = labeledValue(text, "beneficiaryPhone")?.value ?? "";
   if (!nameMatch) return { name: "", role: explicitRole, phone: explicitPhone };

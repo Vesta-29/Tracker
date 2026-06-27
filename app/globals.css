@@ -111,14 +111,14 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .site-next-step > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .site-next-step.needs-work { border-color: oklch(0.84 0.075 70); background: oklch(0.985 0.022 76); }
 .site-workflow-save { min-width: 126px; }
-.site-section-nav { display: flex; gap: 6px; min-width: 0; overflow-x: auto; padding: 2px 0; scrollbar-width: thin; }
-.site-section-nav-button { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; min-height: 32px; border: 1px solid var(--line); border-radius: 8px; padding: 0 10px; color: var(--ink-muted); background: var(--surface); font-size: 12px; font-weight: 750; transition: background-color 160ms var(--ease-out), border-color 160ms var(--ease-out), color 160ms var(--ease-out), transform 160ms var(--ease-out); }
+.site-section-nav { display: flex; gap: 5px; min-width: 0; flex-wrap: wrap; align-items: center; overflow: visible; padding: 1px 0; }
+.site-section-nav-button { position: relative; flex: 0 1 auto; display: inline-flex; align-items: center; gap: 5px; min-height: 30px; border: 1px solid var(--line); border-radius: 8px; padding: 0 9px; color: var(--ink-muted); background: var(--surface); font-size: 12px; font-weight: 750; white-space: nowrap; transition: background-color 160ms var(--ease-out), border-color 160ms var(--ease-out), color 160ms var(--ease-out), transform 160ms var(--ease-out); }
 .site-section-nav-button:hover { border-color: oklch(0.78 0.035 155); color: var(--ink); background: var(--surface-muted); }
 .site-section-nav-button:active { transform: translateY(1px); }
 .site-section-nav-button.complete { color: var(--accent); border-color: oklch(0.78 0.065 158); background: oklch(0.965 0.025 155); }
 .site-section-nav-button.needs-work { color: oklch(0.45 0.09 62); border-color: oklch(0.86 0.07 72); background: oklch(0.992 0.012 76); }
 .site-section-nav-button.next { color: oklch(0.38 0.105 58); border-color: oklch(0.76 0.1 70); background: oklch(0.97 0.035 76); }
-.site-section-count { min-width: 0; border-radius: 99px; padding: 2px 5px; color: oklch(0.38 0.105 58); background: oklch(0.91 0.055 72); font-size: 10px; font-weight: 800; }
+.site-section-count { width: 6px; height: 6px; border-radius: 99px; background: currentColor; box-shadow: 0 0 0 3px oklch(0.91 0.055 72); }
 #site-details-section, #site-location-section, #required-additional-section, #optional-additional-section, #equipment-section, #beneficiary-contact-section, #remarks-photos-section { scroll-margin-top: 84px; }
 h1 { font-size: 23px; margin: 0; letter-spacing: -0.03em; }
 h2 { font-size: 17px; margin: 0; letter-spacing: -0.02em; }
@@ -305,9 +305,9 @@ tbody tr:last-child td { border-bottom: 0; }
 .paste-report-body { display: grid; gap: 12px; padding: 2px 18px 17px 63px; }
 .paste-report-textarea { min-height: 210px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 13px; line-height: 1.5; }
 .paste-report-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-.paste-report-summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 14px; padding: 0 18px 14px 63px; }
-.paste-report-summary > div:first-child { display: grid; gap: 3px; }
-.paste-report-summary > ul { grid-column: 1 / -1; display: grid; gap: 4px; margin: 3px 0 0; padding-left: 18px; color: oklch(0.45 0.09 65); font-size: 12px; line-height: 1.4; }
+.paste-report-summary { display: grid; justify-items: start; gap: 8px; padding: 0 18px 13px 63px; }
+.paste-report-summary > ul { display: grid; gap: 4px; margin: 0; padding-left: 18px; color: oklch(0.45 0.09 65); font-size: 12px; line-height: 1.4; }
+.paste-report-summary > .button { min-height: 30px; padding: 0 9px; font-size: 12px; }
 .paste-report-diagnostics { grid-column: 1 / -1; line-height: 1.45; }
 .extraction-review { grid-column: 1 / -1; display: grid; gap: 8px; min-width: 0; padding: 10px; border: 1px solid oklch(0.82 0.055 155); border-radius: 8px; background: var(--surface); }
 .extraction-review-head { display: inline-flex; align-items: center; gap: 7px; color: var(--accent); font-size: 12px; }

@@ -113,6 +113,12 @@ Long:123.423355\u00b0E`);
     });
   });
 
+  it("prefers the contact person over the beneficiary label for contact name", () => {
+    const result = parseSiteActivationReport(`Beneficiary:San Andres elementary school
+Contact Person (School Head/ICT Teacher):Redemcion F Maulawin`);
+    expect(result.values.beneficiaryName).toBe("Redemcion F Maulawin");
+  });
+
   it("captures multiline remarks and tolerates missing optional fields", () => {
     const result = parseSiteActivationReport("School Name: Small ES\nRemarks: First line\nSecond line");
     expect(result.values.remarks).toBe("First line Second line");

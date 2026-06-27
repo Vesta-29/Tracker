@@ -10,7 +10,7 @@ const descriptions: Record<(typeof SITE_REPORT_FIELDS)[number], string> = {
   starlinkKitNumber: "Starlink kit number.", activationDate: "Explicit activation date, YYYY-MM-DD.",
   ap1IndoorSerial: "First Indoor AP serial.", ap2IndoorSerial: "Second Indoor AP serial.", ap3OutdoorSerial: "Outdoor AP serial.",
   ruijieRouterSerial: "Ruijie router serial.", contractor: "Company Name or MSP.", installerTeamLead: "Installer or Team Lead name.",
-  installDate: "Installation date or general report Date, YYYY-MM-DD.", beneficiaryName: "Beneficiary or contact person name.",
+  installDate: "Installation date or general report Date, YYYY-MM-DD.", beneficiaryName: "Contact Person (School Head/ICT Teacher) name when present; otherwise Beneficiary name.",
   beneficiaryRole: "Beneficiary position or role, including an unlabeled line after the name.", beneficiaryPhone: "Beneficiary phone number.",
   remarks: "Remarks or notes.", logInTime: "Log-In Time for diagnostics only.",
 };
@@ -45,7 +45,7 @@ export async function POST(request: Request) {
     const ai = new GoogleGenAI({ apiKey });
     const result = await ai.models.generateContent({
       model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
-      contents: `Extract only values explicitly present in this activation report. Return an empty string when absent. Never invent or correct names, identifiers, phone numbers, coordinates, or serial numbers. Prefer Flag Pole coordinates over Commbox coordinates. A general Date is the installation date. Beneficiary role and phone may be unlabeled lines after the beneficiary name.\n\n${report}`,
+      contents: `Extract only values explicitly present in this activation report. Return an empty string when absent. Never invent or correct names, identifiers, phone numbers, coordinates, or serial numbers. Prefer Flag Pole coordinates over Commbox coordinates. A general Date is the installation date. When both Beneficiary and Contact Person are present, use Contact Person as beneficiaryName. Beneficiary role and phone may be unlabeled lines after the beneficiary name.\n\n${report}`,
       config: { temperature: 0, responseMimeType: "application/json", responseJsonSchema: { type: "object", properties, required: [...SITE_REPORT_FIELDS], additionalProperties: false } },
     });
     if (!result.text) throw new Error("Gemini returned an empty response.");
