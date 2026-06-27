@@ -508,7 +508,10 @@ export default function TrackerApp() {
     try { await saveVisit(installation, visit, components); await refresh({ invalidate: true }); notify("Service visit saved."); return true; }
     catch (error) { notify(error instanceof Error ? error.message : "Unable to save service visit."); return false; }
   }
-  function startEdit(record: Installation) { navigate(`/sites/${encodeURIComponent(record.id)}`); }
+  function startEdit(record: Installation) {
+    const query = siteFilterQuery(pendingFiltersRef.current ?? filters);
+    navigate(`/sites/${encodeURIComponent(record.id)}${query ? `?${query}` : ""}`);
+  }
   if (!supabaseConfigured) return <SetupRequired />;
   if (loading) return pathname === "/" ? <div className="login"><div className="login-card"><strong>Loading FieldTrack...</strong></div></div> : <RouteLoading pathname={pathname} />;
   if (passwordSetup) return <PasswordSetup onSave={async (password) => { await setPassword(password); setPasswordSetup(false); await refresh(); }} />;
@@ -682,7 +685,7 @@ function siteFilterLabels(filters: Filter, refs: ReferenceData, records: Install
   ].filter(Boolean) as string[];
 }
 
-function FilterBar({ records, refs, filters, setFilters, compact = false, matchingCount }: { records: Installation[]; refs: ReferenceData; filters: Filter; setFilters: (f: Filter) => void; compact?: boolean; matchingCount?: number }) {
+function FilterBar({ records, refs, filters, setFilters, compact = false, matchingCount, promoteUpdatedDate = false }: { records: Installation[]; refs: ReferenceData; filters: Filter; setFilters: (f: Filter) => void; compact?: boolean; matchingCount?: number; promoteUpdatedDate?: boolean }) {
   const [advanced, setAdvanced] = useState(false);
   const [searchDraft, setSearchDraft] = useState(filters.search);
   const [savedViews, setSavedViews] = useState<SavedSiteFilter[]>(() => {
@@ -703,7 +706,7 @@ function FilterBar({ records, refs, filters, setFilters, compact = false, matchi
   const municipalities = uniqueLocations(records.filter((record) => (!filters.islandGroup || record.islandGroup === filters.islandGroup) && (!filters.regionCode || record.regionCode === filters.regionCode) && (!filters.provinceCode || record.provinceCode === filters.provinceCode)).map((record) => ({ code: record.municipalityCode, name: record.municipality })));
   const barangays = uniqueLocations(records.filter((record) => record.barangayCode && (!filters.islandGroup || record.islandGroup === filters.islandGroup) && (!filters.regionCode || record.regionCode === filters.regionCode) && (!filters.provinceCode || record.provinceCode === filters.provinceCode) && (!filters.municipalityCode || record.municipalityCode === filters.municipalityCode)).map((record) => ({ code: record.barangayCode, name: record.barangay })));
   const activeLocationCount = [filters.islandGroup, filters.regionCode, filters.provinceCode, filters.municipalityCode, filters.barangayCode].filter(Boolean).length;
-  const secondaryFilterCount = [filters.contractor, filters.updatedBy, filters.from || filters.to ? "date" : "", activeLocationCount ? "location" : ""].filter(Boolean).length;
+  const secondaryFilterCount = [filters.contractor, promoteUpdatedDate ? "" : filters.updatedBy, promoteUpdatedDate ? "" : filters.from || filters.to ? "date" : "", activeLocationCount ? "location" : ""].filter(Boolean).length;
   const active = filters.search || filters.status || filters.contractor || filters.updatedBy || activeLocationCount || filters.from || filters.to || filters.attention;
   const showAdvancedFilters = advanced || !compact;
   const activeFilterLabels = siteFilterLabels(filters, refs, records);
@@ -758,13 +761,15 @@ function FilterBar({ records, refs, filters, setFilters, compact = false, matchi
   const advancedFilters = <div className="advanced-filter-grid">
     {savedViews.length > 0 && <div className="saved-view-control"><select className="select saved-view-select" aria-label="Apply saved site filter" value={selectedSavedViewId} onChange={(event) => applySavedView(event.target.value)}><option value="">Saved views</option>{savedViews.map((view) => <option value={view.id} key={view.id}>{view.name}</option>)}</select><button type="button" className="button icon-button ghost saved-view-delete" disabled={!selectedSavedViewId} aria-label="Delete selected saved view" title="Delete selected saved view" onClick={deleteSelectedSavedView}><Trash2 size={15} /></button></div>}
     <select className="select" aria-label="Filter sites by contractor" value={filters.contractor} onChange={(e) => setFilters({ ...filters, contractor: e.target.value })}><option value="">All contractors</option>{refs.contractors.map((c) => <option key={c.id}>{c.name}</option>)}</select>
-    <select className="select updated-by-filter" aria-label="Filter sites by updated by" value={filters.updatedBy} onChange={(e) => setFilters({ ...filters, updatedBy: e.target.value })}><option value="">Updated by</option>{updatedByOptions.map((name) => <option key={name}>{name}</option>)}</select>
-    <DateRangeFilter from={filters.from} to={filters.to} minDate={minDate} maxDate={maxDate} onChange={(range) => setFilters({ ...filters, ...range })} ariaLabel="Filter sites by installation date" />
+    {!promoteUpdatedDate && <select className="select updated-by-filter" aria-label="Filter sites by updated by" value={filters.updatedBy} onChange={(e) => setFilters({ ...filters, updatedBy: e.target.value })}><option value="">Updated by</option>{updatedByOptions.map((name) => <option key={name}>{name}</option>)}</select>}
+    {!promoteUpdatedDate && <DateRangeFilter from={filters.from} to={filters.to} minDate={minDate} maxDate={maxDate} onChange={(range) => setFilters({ ...filters, ...range })} ariaLabel="Filter sites by installation date" />}
     {locationFilters}
   </div>;
   return <div className="filter-stack">
     <div className="toolbar filter-row filter-primary-row">
       <div className="input-wrap"><Search className="input-icon" size={17} /><input className="field search" data-site-search="true" aria-label="Search sites" value={searchDraft} onChange={(e) => setSearchDraft(e.target.value)} placeholder="Search site, school ID, or location" /></div>
+      {promoteUpdatedDate && <select className="select updated-by-filter" aria-label="Filter sites by updated by" value={filters.updatedBy} onChange={(e) => setFilters({ ...filters, updatedBy: e.target.value })}><option value="">Updated by</option>{updatedByOptions.map((name) => <option key={name}>{name}</option>)}</select>}
+      {promoteUpdatedDate && <DateRangeFilter from={filters.from} to={filters.to} minDate={minDate} maxDate={maxDate} onChange={(range) => setFilters({ ...filters, ...range })} ariaLabel="Filter sites by installation date" />}
       <button type="button" className={`button advanced-filter-trigger ${advanced || secondaryFilterCount ? "active" : ""}`} aria-expanded={advanced} onClick={() => setAdvanced((open) => !open)}>More filters{secondaryFilterCount > 0 && <span>{secondaryFilterCount}</span>}<ChevronDown size={14} /></button>
     </div>
     <div className="status-filter-row" role="group" aria-label="Filter sites by status">
@@ -788,7 +793,7 @@ function Dashboard({ records, allRecords, refs, filters, setFilters, setPage, ca
   return <>
     <div className="page-head"><div><p className="eyebrow">Overview</p><h1>Site dashboard</h1><p className="muted">Track site activity and review records that need follow-up.</p></div>{canEdit && <button className="button primary" onClick={() => setPage("new")}><Plus size={16} />Add site</button>}</div>
     <div className="stats status-stats" style={{ "--status-count": String(Math.max(counts.length, 1)) } as React.CSSProperties}>{counts.map(({ status, label, count }) => <button type="button" className="stat stat-button" key={status} onClick={() => { setFilters({ ...filters, status }); setPage("installations"); }}><span className="small muted">{label}</span><span className="stat-value">{count}<span className="status-dot" aria-hidden="true" style={{ background: siteStatusColor(status, refs) }} /></span></button>)}</div>
-    <div style={{ marginBottom: 16 }}><FilterBar records={allRecords} refs={refs} filters={filters} setFilters={setFilters} compact matchingCount={records.length} /></div>
+    <div style={{ marginBottom: 16 }}><FilterBar records={allRecords} refs={refs} filters={filters} setFilters={setFilters} compact matchingCount={records.length} promoteUpdatedDate /></div>
     <div className="two-pane">
       <div className="panel"><div className="panel-head"><div><h2>Latest installations</h2><div className="small muted">{records.length} matching records</div></div><button className="button ghost" onClick={() => setPage("installations")}>View all sites</button></div><RecordsTable records={records.slice(0, 6)} /></div>
       <div className="panel"><div className="panel-head"><div><h2>By contractor</h2><div className="small muted">Current filtered distribution</div></div><BarChart3 size={18} className="muted" /></div>{contractors.length ? <div className="section contractor-distribution">{visibleContractors.map((c) => <div className="bar-row" key={c.name}><span className="small contractor-name" title={c.name}>{c.name}</span><span className="bar"><span style={{ width: `${(c.count/max)*100}%` }} /></span><strong>{c.count}</strong></div>)}{contractors.length > 5 && <button type="button" className="button ghost contractor-expand" onClick={() => setShowAllContractors((show) => !show)}>{showAllContractors ? "Show top contractors" : `Show all ${contractors.length} contractors`}</button>}</div> : <div className="empty contractor-empty"><BarChart3 size={22} /><p><strong>No contractor activity matches these filters.</strong></p><span>Adjust the filters to view the distribution.</span></div>}</div>
@@ -805,7 +810,7 @@ function Installations({ records, allRecords, refs, filters, setFilters, startEd
   return <>
     <div className="page-head"><div><p className="eyebrow">Registry</p><h1>Sites</h1><p className="muted">Find a site record and review its deployed equipment.</p></div><div className="toolbar"><button className="button" onClick={() => downloadCsv(records, refs)}><Download size={16} />Export CSV</button><button className="button" onClick={async () => downloadXlsx(await loadInstallationValidationRecords(), refs)}><FileSpreadsheet size={16} />Export XLSX</button>{canEdit && <button className="button primary" onClick={() => setPage("new")}><Plus size={16} />Add site</button>}</div></div>
     <div className="shortcut-hint small muted">Shortcuts: Ctrl+K search, Alt+N new site.</div>
-    <div style={{ marginBottom: 16 }}><FilterBar records={allRecords} refs={refs} filters={filters} setFilters={setFilters} compact matchingCount={records.length} /></div>
+    <div style={{ marginBottom: 16 }}><FilterBar records={allRecords} refs={refs} filters={filters} setFilters={setFilters} compact matchingCount={records.length} promoteUpdatedDate /></div>
     <div className="panel"><div className="panel-head"><strong>{records.length} records</strong></div><RecordsTable records={records} refs={refs} filters={filters} onClearFilters={() => setFilters(emptyFilter)} onSelect={startEdit} detailed canEdit={canEdit} onBulkUpdate={onBulkUpdate} /></div>
   </>;
 }
