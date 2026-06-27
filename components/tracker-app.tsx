@@ -2122,6 +2122,7 @@ function equipmentFieldValue(component: Component | undefined, refs: ReferenceDa
 
 function installationExcelClipboardRow(record: Installation, refs: ReferenceData, part: "first" | "last") {
   const cleanCell = (value: unknown) => String(value ?? "").replace(/[\t\r\n]+/g, " ").trim();
+  const longDate = (value: string | undefined) => value ? new Intl.DateTimeFormat("en-US", { timeZone: appTimeZone, month: "long", day: "numeric", year: "numeric" }).format(new Date(value)) : "";
   const starlink = record.components.find((component) => !component.removedAt && exportMatchKey(component.type).includes("starlink"));
   const completeAddress = record.contractorAddress.trim() || [record.barangay, record.municipality, record.province].map((part) => part.trim()).filter(Boolean).join(", ");
   const contact = beneficiaryContactList(record).find(contactHasValue);
@@ -2138,9 +2139,9 @@ function installationExcelClipboardRow(record: Installation, refs: ReferenceData
     record.installerTeamLead,
     record.contractor,
     record.updatedBy,
+    longDate(record.activationDate),
     "",
     "",
-    record.remarks,
     contact?.name ?? "",
     contact?.phone ?? "",
   ];
