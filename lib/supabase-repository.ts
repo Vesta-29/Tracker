@@ -290,7 +290,7 @@ export async function loadInstallationSummaries() {
     id,school_id,site_name,kit_number,installer_team_lead,install_date,activation_date,status,region_code,province_code,municipality_code,barangay_code,contractor_address,longitude,latitude,beneficiary_contacts,beneficiary_name,beneficiary_role,beneficiary_phone,remarks,created_at,updated_at,
     unitType:unit_types(name),contractor:contractors(name),createdBy:profiles!installations_created_by_fkey(full_name),updatedBy:profiles!installations_updated_by_fkey(full_name),
     installation_custom_values(field_id,value),installation_components(id)
-  `).order("install_date", { ascending: false });
+  `).order("created_at", { ascending: false });
   if (error) throw error;
   const locationNames = await locationNamesFor(data);
   return data.map((row) => mapInstallationSummary(row, locationNames));
@@ -302,7 +302,7 @@ export async function loadServiceVisitSummaries() {
     unitType:unit_types(name),contractor:contractors(name),createdBy:profiles!installations_created_by_fkey(full_name),updatedBy:profiles!installations_updated_by_fkey(full_name),
     installation_components(id),
     service_visits(id,display_id,status,ticket_reference,scheduled_date,completed_date,notes,created_at,updated_at,type:service_visit_types(name),contractor:contractors(name),createdBy:profiles!service_visits_created_by_fkey(full_name),updatedBy:profiles!service_visits_updated_by_fkey(full_name))
-  `).order("install_date", { ascending: false });
+  `).order("created_at", { ascending: false });
   if (error) throw error;
   const locationNames = await locationNamesFor(data);
   return Promise.all(data.map(async (row) => ({ ...mapInstallationSummary(row, locationNames), serviceVisits: await Promise.all((row.service_visits || []).map(mapVisit)) })));
@@ -316,7 +316,7 @@ const installationDetailSelect = `
 const serviceVisitDetailSelect = "*,type:service_visit_types(name),contractor:contractors(name),createdBy:profiles!service_visits_created_by_fkey(full_name),updatedBy:profiles!service_visits_updated_by_fkey(full_name),service_visit_photos(storage_path,caption),service_visit_component_changes(*)";
 
 export async function loadInstallations() {
-  const { data, error } = await supabase().from("installations").select(installationDetailSelect).order("install_date", { ascending: false });
+  const { data, error } = await supabase().from("installations").select(installationDetailSelect).order("created_at", { ascending: false });
   if (error) throw error;
   const locationNames = await locationNamesFor(data);
   return Promise.all(data.map((row) => mapInstallation(row, locationNames)));

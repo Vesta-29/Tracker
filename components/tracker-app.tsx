@@ -185,6 +185,7 @@ function referenceNamesChanged(current: ReferenceData, previous: ReferenceData) 
 }
 function niceDate(value: string) { return new Intl.DateTimeFormat("en-PH", { timeZone: appTimeZone, month: "short", day: "numeric", year: "numeric" }).format(new Date(value)); }
 function niceDateTime(value: string) { return new Intl.DateTimeFormat("en-PH", { timeZone: appTimeZone, month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(value)); }
+function newestCreatedFirst<T extends { createdAt?: string }>(items: T[]) { return [...items].sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || "")); }
 function useEscape(onEscape: () => void, active = true) {
   useEffect(() => {
     if (!active) return;
@@ -447,7 +448,7 @@ export default function TrackerApp() {
     return () => window.removeEventListener("keydown", handleShortcuts);
   }, [canEdit, hasUnsavedReferences, page, saveReferences, setPage]);
 
-  const filtered = useMemo(() => records.filter((r) =>
+  const filtered = useMemo(() => newestCreatedFirst(records.filter((r) =>
     (!filters.search || `${r.id} ${r.siteName} ${r.legacyKitNumber ?? ""} ${r.barangay} ${r.municipality} ${r.province} ${r.contractor}`.toLowerCase().includes(filters.search.toLowerCase())) &&
     (!filters.status || r.status === filters.status) &&
     (!filters.contractor || r.contractor === filters.contractor) &&
@@ -460,7 +461,7 @@ export default function TrackerApp() {
     (!filters.from || r.installDate >= filters.from) &&
     (!filters.to || r.installDate <= filters.to) &&
     (!filters.attention || (filters.attention === "missingName" ? !r.siteName : Boolean(r.legacyKitNumber)))
-  ), [records, filters]);
+  )), [records, filters]);
 
   async function save(record: Installation, dest: Page = "installations", href = "") {
     try {
