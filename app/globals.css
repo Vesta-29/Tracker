@@ -486,6 +486,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .school-directory-current { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .school-directory-current > div:first-child { display: grid; gap: 4px; min-width: 0; }
 .school-directory-current > div:first-child strong, .school-directory-current > div:first-child span { overflow-wrap: anywhere; }
+.school-directory-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
 .school-directory-counts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .school-directory-counts span { display: inline-flex; align-items: baseline; gap: 4px; border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; color: var(--ink-muted); font-size: 12px; }
 .school-directory-counts strong { color: var(--ink); }
@@ -741,6 +742,7 @@ tbody tr:last-child td { border-bottom: 0; }
   .dropzone { padding: 17px; }
   .school-lookup-results { width: 100%; max-width: 100%; }
   .school-directory-current { align-items: stretch; flex-direction: column; }
+  .school-directory-actions { align-items: stretch; justify-content: flex-start; }
   .school-directory-counts { justify-content: flex-start; }
   .school-directory-preview .panel-head { align-items: stretch; flex-direction: column; }
   .school-directory-preview .toolbar { display: grid; grid-template-columns: 1fr; }

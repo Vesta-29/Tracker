@@ -150,6 +150,24 @@ export async function loadSchoolDirectoryStatus(): Promise<SchoolDirectoryStatus
   return { filename: data.filename, totalRows: data.total_rows, completeRows: data.complete_rows, partialRows: data.partial_rows, skippedRows: data.skipped_rows, uploadedBy: value(data.uploader)?.full_name || "Administrator", uploadedAt: data.created_at };
 }
 
+export async function loadSchoolDirectoryEntries(): Promise<SchoolDirectoryEntry[]> {
+  const rows: SchoolDirectoryEntry[] = [];
+  for (let from = 0; ; from += 1000) {
+    const to = from + 999;
+    const { data, error } = await supabase().from("school_directory_entries").select(schoolDirectoryColumns).order("source_row").range(from, to);
+    if (error && missingDirectoryColumn(error)) {
+      const legacy = await supabase().from("school_directory_entries").select(legacySchoolDirectoryColumns).order("source_row").range(from, to);
+      if (legacy.error) throw legacy.error;
+      rows.push(...legacy.data.map(mapSchoolDirectoryEntry));
+      if (legacy.data.length < 1000) return rows;
+      continue;
+    }
+    if (error) throw error;
+    rows.push(...data.map(mapSchoolDirectoryEntry));
+    if (data.length < 1000) return rows;
+  }
+}
+
 export async function replaceSchoolDirectory(filename: string, rows: SchoolDirectoryEntry[], counts: { total: number; complete: number; partial: number; skipped: number }) {
   const { error } = await supabase().rpc("replace_school_directory", { source_filename: filename, rows, total_count: counts.total, complete_count: counts.complete, partial_count: counts.partial, skipped_count: counts.skipped });
   if (error) throw error;

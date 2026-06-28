@@ -8,7 +8,7 @@ import {
   Trash2, Users, X
 } from "lucide-react";
 import { islandGroups, getIslandGroup } from "@/lib/location-groups";
-import { bulkUpdateInstallations, clearInvalidSession, consumeAuthCallback, createUser, deleteInstallation, deleteReferencePermanently, extractSiteReportWithGemini, findSchoolDirectoryEntry, generateUserTemporaryPassword, getCachedUsers, listLocationOptions, listUsers, loadInstallations, loadInstallationAuditEvents, loadInstallationByDisplayId, loadInstallationDuplicateValidationRecords, loadInstallationForVisitDisplayId, loadInstallationServiceVisits, loadInstallationSummaries, loadInstallationValidationRecords, loadReferences, loadSchoolDirectoryStatus, loadServiceVisitSummaries, loadProfile, persistReferences, prefetchUsers, replaceSchoolDirectory, requestPasswordReset, saveInstallation, saveInstallationBatch, saveVisit, searchSchoolDirectory, setPassword, signIn, updateUser } from "@/lib/supabase-repository";
+import { bulkUpdateInstallations, clearInvalidSession, consumeAuthCallback, createUser, deleteInstallation, deleteReferencePermanently, extractSiteReportWithGemini, findSchoolDirectoryEntry, generateUserTemporaryPassword, getCachedUsers, listLocationOptions, listUsers, loadInstallations, loadInstallationAuditEvents, loadInstallationByDisplayId, loadInstallationDuplicateValidationRecords, loadInstallationForVisitDisplayId, loadInstallationServiceVisits, loadInstallationSummaries, loadInstallationValidationRecords, loadReferences, loadSchoolDirectoryEntries, loadSchoolDirectoryStatus, loadServiceVisitSummaries, loadProfile, persistReferences, prefetchUsers, replaceSchoolDirectory, requestPasswordReset, saveInstallation, saveInstallationBatch, saveVisit, searchSchoolDirectory, setPassword, signIn, updateUser } from "@/lib/supabase-repository";
 import { supabaseConfigured } from "@/lib/supabase-browser";
 import { useGuardedNavigation, useNavigationBlocker } from "@/lib/guarded-navigation";
 import { plusCodeFromStrings } from "@/lib/plus-code";
@@ -1904,6 +1904,7 @@ function SchoolDirectorySettings({ notify }: { notify: (message: string) => void
   const [preview, setPreview] = useState<SchoolDirectoryPreview>();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState("");
   const refreshStatus = useCallback(async () => { setLoading(true); try { setStatus(await loadSchoolDirectoryStatus()); setError(""); } catch (loadError) { setError(errorMessage(loadError, "Unable to load the school directory status.")); } finally { setLoading(false); } }, []);
   useEffect(() => {
@@ -1944,9 +1945,49 @@ function SchoolDirectorySettings({ notify }: { notify: (message: string) => void
     finally { setSaving(false); }
   }
 
+  async function downloadCurrentDirectory() {
+    setDownloading(true); setError("");
+    try {
+      const entries = await loadSchoolDirectoryEntries();
+      if (!entries.length) throw new Error("There is no current school directory to download.");
+      const workbook = await createWorkbook();
+      const worksheet = workbook.addWorksheet("School Directory");
+      worksheet.columns = [
+        { header: "School ID", key: "schoolId", width: 14 },
+        { header: "Site Code", key: "siteCode", width: 18 },
+        { header: "Site Name", key: "schoolName", width: 36 },
+        { header: "Barangay", key: "barangay", width: 24 },
+        { header: "Locality", key: "municipality", width: 24 },
+        { header: "Province", key: "province", width: 24 },
+        { header: "Region", key: "region", width: 24 },
+        { header: "Island", key: "islandGroup", width: 14 },
+        { header: "PRIORITY SITES (Final)", key: "priority", width: 22 },
+      ];
+      worksheet.addRows(entries.map((entry) => ({
+        schoolId: entry.schoolId,
+        siteCode: entry.siteCode,
+        schoolName: entry.schoolName,
+        barangay: entry.barangay,
+        municipality: entry.municipality,
+        province: entry.province,
+        region: entry.region,
+        islandGroup: entry.islandGroup,
+        priority: entry.priority,
+      })));
+      worksheet.getRow(1).font = { bold: true };
+      worksheet.views = [{ state: "frozen", ySplit: 1 }];
+      worksheet.autoFilter = { from: "A1", to: "I1" };
+      const buffer = await workbook.xlsx.writeBuffer();
+      const filename = status?.filename?.trim() || `school-directory-${today()}.xlsx`;
+      downloadBlob(new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), filename.toLowerCase().endsWith(".xlsx") ? filename : `${filename}.xlsx`);
+      notify(`${entries.length} school directory rows downloaded.`);
+    } catch (downloadError) { setError(errorMessage(downloadError, "Unable to download the current school directory.")); }
+    finally { setDownloading(false); }
+  }
+
   return <div className="school-directory-settings">
     <div className="section immediate-settings-note"><strong>Directory uploads apply immediately.</strong><div className="small muted">Saved site records are never changed when this directory is replaced.</div></div>
-    <div className="section school-directory-current"><div><span className="small muted">Current directory</span>{loading ? <strong>Loading...</strong> : status ? <><strong>{status.filename}</strong><span className="small muted">{status.completeRows + status.partialRows} searchable schools | uploaded {niceDateTime(status.uploadedAt)} by {status.uploadedBy}</span></> : <strong>No directory uploaded</strong>}</div>{status && <div className="school-directory-counts"><span><strong>{status.completeRows}</strong> complete</span><span><strong>{status.partialRows}</strong> partial</span><span><strong>{status.skippedRows}</strong> skipped</span></div>}</div>
+    <div className="section school-directory-current"><div><span className="small muted">Current directory</span>{loading ? <strong>Loading...</strong> : status ? <><strong>{status.filename}</strong><span className="small muted">{status.completeRows + status.partialRows} searchable schools | uploaded {niceDateTime(status.uploadedAt)} by {status.uploadedBy}</span></> : <strong>No directory uploaded</strong>}</div>{status && <div className="school-directory-actions"><div className="school-directory-counts"><span><strong>{status.completeRows}</strong> complete</span><span><strong>{status.partialRows}</strong> partial</span><span><strong>{status.skippedRows}</strong> skipped</span></div><button type="button" className="button" disabled={downloading} onClick={() => void downloadCurrentDirectory()}><Download size={15} />{downloading ? "Downloading..." : "Download XLSX"}</button></div>}</div>
     <div className="section"><label className="dropzone"><FileSpreadsheet size={26} style={{ margin: "auto" }} /><strong>Choose an XLSX or CSV file</strong><span className="small muted">Recognized headers: School ID, Site Code, Site Name, Barangay, Locality, Province, Region, Island, and Priority Sites.</span><input type="file" accept=".xlsx,.csv" hidden onChange={loadFile} /></label></div>
     {error && <div className="section notice validation-notice" role="alert">{error}</div>}
     {preview && <div className="school-directory-preview"><div className="panel-head"><div><strong>Review {preview.filename}</strong><div className="small muted">{preview.complete} complete, {preview.partial} partial, {preview.skipped} skipped | {preview.entries.filter((entry) => entry.priority).length} priority sites</div></div><div className="toolbar"><button type="button" className="button" disabled={saving} onClick={() => setPreview(undefined)}>Cancel</button><button type="button" className="button primary" disabled={saving || !preview.entries.length} onClick={() => void replaceDirectory()}>{saving ? "Replacing..." : `Replace with ${preview.entries.length} schools`}</button></div></div><div className="table-wrap"><table><thead><tr><th>Row</th><th>School ID</th><th>Site code</th><th>Site name</th><th>Location</th><th>Priority</th><th>Result</th></tr></thead><tbody>{preview.entries.slice(0, 25).map((entry) => <tr key={entry.id}><td>{entry.sourceRow}</td><td>{entry.schoolId || "None"}</td><td>{entry.siteCode || "None"}</td><td><strong>{entry.schoolName}</strong></td><td>{[entry.barangay, entry.municipality, entry.province].filter(Boolean).join(", ") || "None"}</td><td>{entry.priority ? <span className="pill issue">{entry.priority}</span> : "None"}</td><td>{entry.warning ? <span className="pill issue">{entry.warning}</span> : <span className="pill installed"><CheckCircle2 size={13} />Ready</span>}</td></tr>)}</tbody></table></div>{preview.entries.length > 25 && <div className="section small muted">Showing the first 25 of {preview.entries.length} searchable rows.</div>}</div>}
