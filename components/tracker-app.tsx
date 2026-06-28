@@ -1062,7 +1062,11 @@ function InstallationForm({
   const [schoolMatches, setSchoolMatches] = useState<SchoolDirectoryEntry[]>([]);
   const [schoolLookupOpen, setSchoolLookupOpen] = useState(false);
   const [schoolLookupIndex, setSchoolLookupIndex] = useState(0);
+  const [schoolIdMatches, setSchoolIdMatches] = useState<SchoolDirectoryEntry[]>([]);
+  const [schoolIdLookupOpen, setSchoolIdLookupOpen] = useState(false);
+  const [schoolIdLookupIndex, setSchoolIdLookupIndex] = useState(0);
   const [schoolLookupNotice, setSchoolLookupNotice] = useState("");
+  const [matchedDirectorySchoolId, setMatchedDirectorySchoolId] = useState("");
   const [pasteReport, setPasteReport] = useState("");
   const [pastePanelOpen, setPastePanelOpen] = useState(false);
   const [extractingReport, setExtractingReport] = useState<"local" | "gemini" | "">("");
@@ -1102,6 +1106,29 @@ function InstallationForm({
     return () => { active = false; window.clearTimeout(timer); };
   }, [record.siteName, schoolLookupOpen]);
 
+  useEffect(() => {
+    if (!schoolIdLookupOpen || record.id.trim().length < 2) return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      void searchSchoolDirectory(record.id).then((matches) => { if (active) { setSchoolIdMatches(matches); setSchoolIdLookupIndex(0); } }).catch(() => { if (active) setSchoolIdMatches([]); });
+    }, 250);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [record.id, schoolIdLookupOpen]);
+
+  useEffect(() => {
+    const schoolId = record.id.trim();
+    if (schoolId.length < 2) return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      void findSchoolDirectoryEntry({ schoolId }).then((match) => {
+        if (active) setMatchedDirectorySchoolId(match?.schoolId === schoolId ? schoolId : "");
+      }).catch(() => {
+        if (active) setMatchedDirectorySchoolId("");
+      });
+    }, 250);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [record.id]);
+
   async function selectDirectorySchool(entry: SchoolDirectoryEntry) {
     let selected = entry;
     let resolutionIssue = entry.warning;
@@ -1113,6 +1140,7 @@ function InstallationForm({
     }
     const next: Partial<Installation> = { siteName: selected.schoolName };
     if (selected.schoolId) next.id = selected.schoolId;
+    setMatchedDirectorySchoolId(selected.schoolId);
     const resolved = Boolean(selected.regionCode && selected.provinceCode && selected.municipalityCode);
     if (resolved) {
       const locationFields = ["islandGroup", "region", "regionCode", "province", "provinceCode", "municipality", "municipalityCode", "barangay", "barangayCode"] as const;
@@ -1122,6 +1150,8 @@ function InstallationForm({
     patch(next);
     setSchoolLookupOpen(false);
     setSchoolMatches([]);
+    setSchoolIdLookupOpen(false);
+    setSchoolIdMatches([]);
   }
 
   async function applyReportExtraction(extraction: SiteReportExtraction, source: "local" | "gemini") {
@@ -1301,6 +1331,13 @@ function InstallationForm({
     else if (event.key === "Enter") { event.preventDefault(); void selectDirectorySchool(schoolMatches[schoolLookupIndex]); }
     else if (event.key === "Escape") setSchoolLookupOpen(false);
   }
+  function schoolIdLookupKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (!schoolIdLookupOpen || !schoolIdMatches.length) return;
+    if (event.key === "ArrowDown") { event.preventDefault(); setSchoolIdLookupIndex((index) => (index + 1) % schoolIdMatches.length); }
+    else if (event.key === "ArrowUp") { event.preventDefault(); setSchoolIdLookupIndex((index) => (index - 1 + schoolIdMatches.length) % schoolIdMatches.length); }
+    else if (event.key === "Enter") { event.preventDefault(); void selectDirectorySchool(schoolIdMatches[schoolIdLookupIndex]); }
+    else if (event.key === "Escape") setSchoolIdLookupOpen(false);
+  }
 
   useEffect(() => {
     setHasUnsavedChanges(isDirty);
@@ -1323,7 +1360,7 @@ function InstallationForm({
   const missingLongitude = !record.longitude.trim();
   const invalidLatitude = Boolean(record.latitude.trim()) && !validCoordinate(record.latitude, -90, 90);
   const invalidLongitude = Boolean(record.longitude.trim()) && !validCoordinate(record.longitude, -180, 180);
-  const activeFields = (refs.customFields ?? []).filter((field) => field.active || Boolean((record.customValues ?? {})[field.id])).sort((a, b) => a.order - b.order);
+  const activeFields = (refs.customFields ?? []).filter((field) => !isDirectoryManagedCustomField(field.label) && (field.active || Boolean((record.customValues ?? {})[field.id]))).sort((a, b) => a.order - b.order);
   const requiredCustomFields = activeFields.filter((field) => field.required);
   const optionalCustomFields = activeFields.filter((field) => !field.required);
   const activeComponents = record.components.filter((component) => !component.removedAt);
@@ -1613,7 +1650,7 @@ function InstallationForm({
       {initial && <section className="section ownership-grid" aria-label="Saved record metadata"><div><span className="small muted">Created by</span><strong>{record.createdBy}</strong></div><div><span className="small muted">Created</span><strong>{niceDateTime(record.createdAt)}</strong></div><div><span className="small muted">Updated by</span><strong>{record.updatedBy}</strong></div><div><span className="small muted">Last saved</span><strong>{niceDateTime(record.updatedAt)}</strong></div></section>}
       <section id="site-details-section" className="section site-details-polish site-details-guided"><div className="section-title"><div><h2>Site details</h2><span className="small muted">Identity, ownership, and current installation state</span></div><div className="toolbar section-copy-actions" aria-label="Copy site details"><button type="button" className={`button ${projectCopied ? "copied" : ""}`} disabled={saving || deleting || !record.id.trim() || !record.siteName.trim()} onClick={() => void copyProjectName()} title="Copy ELRN project name">{projectCopied ? <CheckCircle2 size={15} /> : <ClipboardCopy size={15} />}{projectCopyLabel}</button><button type="button" className={`button ${excelSiteCopied ? "copied" : ""}`} disabled={saving || deleting} onClick={() => void copyForExcel("first")} title="Copy BEIS School ID, Site Name, and Site Complete Address">{excelSiteCopied ? <CheckCircle2 size={15} /> : <ClipboardCopy size={15} />}{excelSiteCopyLabel}</button><button type="button" className={`button ${excelActivationCopied ? "copied" : ""}`} disabled={saving || deleting} onClick={() => void copyForExcel("last")} title="Copy activation columns">{excelActivationCopied ? <CheckCircle2 size={15} /> : <ClipboardCopy size={15} />}{excelActivationCopyLabel}</button></div></div><div className="grid-3">
         <label className="school-lookup">Site name<input id="site-name-input" required className={`field${extractionHighlight("siteName")}`} role="combobox" aria-autocomplete="list" aria-expanded={schoolLookupOpen && schoolMatches.length > 0} aria-controls="school-directory-results" aria-invalid={Boolean((triedSubmit && missingSiteName) || duplicate) || undefined} aria-describedby={siteNameDescriptions} value={record.siteName} onFocus={() => setSchoolLookupOpen(true)} onBlur={() => window.setTimeout(() => setSchoolLookupOpen(false), 120)} onKeyDown={schoolLookupKeyDown} onChange={(e) => { patch({ siteName: e.target.value }); setSchoolLookupOpen(true); setSchoolLookupNotice(""); }} placeholder="Search or enter a school name" />{schoolLookupOpen && record.siteName.trim().length >= 2 && schoolMatches.length > 0 && <div className="school-lookup-results" id="school-directory-results" role="listbox">{schoolMatches.map((entry, index) => <button type="button" className={`school-lookup-option ${index === schoolLookupIndex ? "active" : ""}`} role="option" aria-selected={index === schoolLookupIndex} key={entry.id} onMouseDown={(event) => event.preventDefault()} onClick={() => selectDirectorySchool(entry)}><span className="school-lookup-name">{entry.schoolName}</span><span className="school-lookup-province">{entry.province || "Province unavailable"}</span></button>)}</div>}</label>
-        <label>School ID<input id="school-id-input" required className={`field${extractionHighlight("id")}`} aria-invalid={Boolean((triedSubmit && !schoolId) || duplicateSchoolId) || undefined} aria-describedby={schoolIdDescriptions} value={record.id} onChange={(e) => patch({ id: e.target.value })} placeholder="School ID" /></label>
+        <label className="school-lookup">School ID<span className="verified-field-wrap"><input id="school-id-input" required className={`field${extractionHighlight("id")}`} role="combobox" aria-autocomplete="list" aria-expanded={schoolIdLookupOpen && schoolIdMatches.length > 0} aria-controls="school-id-directory-results" aria-invalid={Boolean((triedSubmit && !schoolId) || duplicateSchoolId) || undefined} aria-describedby={schoolIdDescriptions} value={record.id} onFocus={() => setSchoolIdLookupOpen(true)} onBlur={() => window.setTimeout(() => setSchoolIdLookupOpen(false), 120)} onKeyDown={schoolIdLookupKeyDown} onChange={(e) => { patch({ id: e.target.value }); setSchoolIdLookupOpen(true); setSchoolLookupNotice(""); }} placeholder="Search or enter School ID" />{matchedDirectorySchoolId === record.id.trim() && <CheckCircle2 className="field-check-icon" size={16} aria-label="School ID found in directory" />}</span>{schoolIdLookupOpen && record.id.trim().length >= 2 && schoolIdMatches.length > 0 && <div className="school-lookup-results" id="school-id-directory-results" role="listbox">{schoolIdMatches.map((entry, index) => <button type="button" className={`school-lookup-option ${index === schoolIdLookupIndex ? "active" : ""}`} role="option" aria-selected={index === schoolIdLookupIndex} key={entry.id} onMouseDown={(event) => event.preventDefault()} onClick={() => selectDirectorySchool(entry)}><span className="school-lookup-name">{entry.schoolId || "No School ID"}</span><span className="school-lookup-province">{entry.schoolName}</span></button>)}</div>}</label>
         <label>Site Code<input id="site-code-input" className="field" value={record.id.trim() ? projectSiteCode(record) : ""} placeholder="Autofills from School ID" readOnly /></label>
         <label>Solution<select id="solution-input" className={`select${extractionHighlight("unitType")}`} aria-invalid={Boolean(triedSubmit && missingUnitType) || undefined} aria-describedby={triedSubmit && missingUnitType ? "solution-required-error" : undefined} value={record.unitType} onChange={(e) => patch({ unitType: e.target.value })}>{activeOptions(refs.unitTypes, record.unitType).map((x) => <option key={x.id}>{x.name}</option>)}</select></label>
         <div><label>Contractor<select id="contractor-input" className={`select${extractionHighlight("contractor")}`} aria-invalid={Boolean(triedSubmit && missingContractor) || undefined} aria-describedby={triedSubmit && missingContractor ? "contractor-required-error" : undefined} value={record.contractor} onChange={(e) => { if (e.target.value === addContractorOption) { setAddingContractor(true); setContractorError(""); return; } patch({ contractor: e.target.value }); }}>{activeOptions(refs.contractors, record.contractor).map((x) => <option key={x.id}>{x.name}</option>)}<option value={addContractorOption}>+ Add contractor</option></select></label>{addingContractor && <div style={{ display: "grid", gap: 8, marginTop: 8 }}><input className="field" value={newContractorName} onChange={(e) => setNewContractorName(e.target.value)} placeholder="New contractor name" disabled={contractorSaving} /><div className="toolbar"><button type="button" className="button" disabled={contractorSaving} onClick={() => { setAddingContractor(false); setNewContractorName(""); setContractorError(""); }}>Cancel</button><button type="button" className="button primary" disabled={contractorSaving || !newContractorName.trim()} onClick={() => void submitNewContractor()}>{contractorSaving ? "Adding..." : "Add and select"}</button></div>{contractorError && <div className="small validation-copy">{contractorError}</div>}</div>}</div>
@@ -1855,6 +1892,12 @@ async function spreadsheetRows(file: File) {
 }
 
 function directoryHeader(value: string) { return value.trim().toLowerCase().replace(/[^a-z0-9]/g, ""); }
+function isDirectoryManagedCustomField(label: string) { return directoryHeader(label) === "sitepriority"; }
+function directoryIslandGroup(value: string): Installation["islandGroup"] | "" {
+  const normalized = directoryHeader(value);
+  if (normalized === "ncr" || normalized === "metromanila" || normalized === "nationalcapitalregion") return "Luzon";
+  return islandGroups.find((group) => directoryHeader(group) === normalized) ?? "";
+}
 
 function SchoolDirectorySettings({ notify }: { notify: (message: string) => void }) {
   const [status, setStatus] = useState<SchoolDirectoryStatus | null>();
@@ -1875,18 +1918,19 @@ function SchoolDirectorySettings({ notify }: { notify: (message: string) => void
     try {
       const rows = await spreadsheetRows(file); if (!rows.length) throw new Error("The spreadsheet is empty.");
       const headers = rows[0].map(directoryHeader); const column = (names: string[]) => headers.findIndex((header) => names.includes(header));
-      const columns = { schoolId: column(["schoolid"]), schoolName: column(["schoolname"]), islandGroup: column(["islandgroup"]), region: column(["region"]), province: column(["province"]), municipality: column(["municipality", "locality", "citymunicipality"]), barangay: column(["brgy", "barangay"]) };
+      const columns = { schoolId: column(["schoolid"]), siteCode: column(["sitecode"]), schoolName: column(["schoolname", "sitename"]), islandGroup: column(["island", "islandgroup"]), region: column(["region"]), province: column(["province"]), municipality: column(["municipality", "locality", "citymunicipality"]), barangay: column(["brgy", "barangay"]), priority: column(["prioritysitesfinal", "priority", "prioritysites"]) };
       if (columns.schoolName < 0) throw new Error('Add a "School Name" column before uploading.');
       const { resolveLocation } = await import("@/lib/locations");
       const entries: SchoolDirectoryEntry[] = []; let skipped = 0; let complete = 0; let partial = 0;
       rows.slice(1).forEach((values, index) => {
         const get = (position: number) => position < 0 ? "" : String(values[position] ?? "").trim();
         const schoolName = get(columns.schoolName); if (!schoolName) { skipped += 1; return; }
-        const schoolId = get(columns.schoolId); const raw = { islandGroup: get(columns.islandGroup), region: get(columns.region), province: get(columns.province), municipality: get(columns.municipality), barangay: get(columns.barangay) };
+        const schoolId = get(columns.schoolId); const siteCode = get(columns.siteCode); const priority = get(columns.priority);
+        const raw = { islandGroup: directoryIslandGroup(get(columns.islandGroup)), region: get(columns.region), province: get(columns.province), municipality: get(columns.municipality), barangay: get(columns.barangay) };
         const resolution = resolveLocation(raw); const location = resolution.location;
-        const warnings = [!schoolId ? "Missing School ID" : "", resolution.issue || ""].filter(Boolean);
+        const warnings = [!schoolId ? "Missing School ID" : "", !siteCode ? "Missing Site Code" : ""].filter(Boolean);
         if (warnings.length) partial += 1; else complete += 1;
-        entries.push({ id: uuid(), schoolId, schoolName, islandGroup: location?.islandGroup || (islandGroups.some((group) => group === raw.islandGroup) ? raw.islandGroup as Installation["islandGroup"] : ""), region: location?.region || raw.region, regionCode: location?.regionCode || "", province: location?.province || raw.province, provinceCode: location?.provinceCode || "", municipality: location?.municipality || raw.municipality, municipalityCode: location?.municipalityCode || "", barangay: location?.barangay || raw.barangay, barangayCode: location?.barangayCode || "", sourceRow: index + 2, warning: warnings.join("; ") });
+        entries.push({ id: uuid(), schoolId, siteCode, schoolName, islandGroup: location?.islandGroup || (islandGroups.some((group) => group === raw.islandGroup) ? raw.islandGroup as Installation["islandGroup"] : ""), region: location?.region || raw.region, regionCode: location?.regionCode || "", province: location?.province || raw.province, provinceCode: location?.provinceCode || "", municipality: location?.municipality || raw.municipality, municipalityCode: location?.municipalityCode || "", barangay: location?.barangay || raw.barangay, barangayCode: location?.barangayCode || "", priority, sourceRow: index + 2, warning: warnings.join("; ") });
       });
       setPreview({ filename: file.name, entries, total: Math.max(0, rows.length - 1), complete, partial, skipped });
     } catch (loadError) { setError(errorMessage(loadError, "Unable to read the spreadsheet.")); }
@@ -1903,9 +1947,9 @@ function SchoolDirectorySettings({ notify }: { notify: (message: string) => void
   return <div className="school-directory-settings">
     <div className="section immediate-settings-note"><strong>Directory uploads apply immediately.</strong><div className="small muted">Saved site records are never changed when this directory is replaced.</div></div>
     <div className="section school-directory-current"><div><span className="small muted">Current directory</span>{loading ? <strong>Loading...</strong> : status ? <><strong>{status.filename}</strong><span className="small muted">{status.completeRows + status.partialRows} searchable schools | uploaded {niceDateTime(status.uploadedAt)} by {status.uploadedBy}</span></> : <strong>No directory uploaded</strong>}</div>{status && <div className="school-directory-counts"><span><strong>{status.completeRows}</strong> complete</span><span><strong>{status.partialRows}</strong> partial</span><span><strong>{status.skippedRows}</strong> skipped</span></div>}</div>
-    <div className="section"><label className="dropzone"><FileSpreadsheet size={26} style={{ margin: "auto" }} /><strong>Choose an XLSX or CSV file</strong><span className="small muted">Recognized headers: Region, School ID, School Name, BRGY, Municipality, Province, and Island Group.</span><input type="file" accept=".xlsx,.csv" hidden onChange={loadFile} /></label></div>
+    <div className="section"><label className="dropzone"><FileSpreadsheet size={26} style={{ margin: "auto" }} /><strong>Choose an XLSX or CSV file</strong><span className="small muted">Recognized headers: School ID, Site Code, Site Name, Barangay, Locality, Province, Region, Island, and Priority Sites.</span><input type="file" accept=".xlsx,.csv" hidden onChange={loadFile} /></label></div>
     {error && <div className="section notice validation-notice" role="alert">{error}</div>}
-    {preview && <div className="school-directory-preview"><div className="panel-head"><div><strong>Review {preview.filename}</strong><div className="small muted">{preview.complete} complete, {preview.partial} partial, {preview.skipped} skipped</div></div><div className="toolbar"><button type="button" className="button" disabled={saving} onClick={() => setPreview(undefined)}>Cancel</button><button type="button" className="button primary" disabled={saving || !preview.entries.length} onClick={() => void replaceDirectory()}>{saving ? "Replacing..." : `Replace with ${preview.entries.length} schools`}</button></div></div><div className="table-wrap"><table><thead><tr><th>Row</th><th>School ID</th><th>School name</th><th>Location</th><th>Result</th></tr></thead><tbody>{preview.entries.slice(0, 25).map((entry) => <tr key={entry.id}><td>{entry.sourceRow}</td><td>{entry.schoolId || "None"}</td><td><strong>{entry.schoolName}</strong></td><td>{[entry.barangay, entry.municipality, entry.province].filter(Boolean).join(", ") || "None"}</td><td>{entry.warning ? <span className="pill issue">{entry.warning}</span> : <span className="pill installed"><CheckCircle2 size={13} />Ready</span>}</td></tr>)}</tbody></table></div>{preview.entries.length > 25 && <div className="section small muted">Showing the first 25 of {preview.entries.length} searchable rows.</div>}</div>}
+    {preview && <div className="school-directory-preview"><div className="panel-head"><div><strong>Review {preview.filename}</strong><div className="small muted">{preview.complete} complete, {preview.partial} partial, {preview.skipped} skipped | {preview.entries.filter((entry) => entry.priority).length} priority sites</div></div><div className="toolbar"><button type="button" className="button" disabled={saving} onClick={() => setPreview(undefined)}>Cancel</button><button type="button" className="button primary" disabled={saving || !preview.entries.length} onClick={() => void replaceDirectory()}>{saving ? "Replacing..." : `Replace with ${preview.entries.length} schools`}</button></div></div><div className="table-wrap"><table><thead><tr><th>Row</th><th>School ID</th><th>Site code</th><th>Site name</th><th>Location</th><th>Priority</th><th>Result</th></tr></thead><tbody>{preview.entries.slice(0, 25).map((entry) => <tr key={entry.id}><td>{entry.sourceRow}</td><td>{entry.schoolId || "None"}</td><td>{entry.siteCode || "None"}</td><td><strong>{entry.schoolName}</strong></td><td>{[entry.barangay, entry.municipality, entry.province].filter(Boolean).join(", ") || "None"}</td><td>{entry.priority ? <span className="pill issue">{entry.priority}</span> : "None"}</td><td>{entry.warning ? <span className="pill issue">{entry.warning}</span> : <span className="pill installed"><CheckCircle2 size={13} />Ready</span>}</td></tr>)}</tbody></table></div>{preview.entries.length > 25 && <div className="section small muted">Showing the first 25 of {preview.entries.length} searchable rows.</div>}</div>}
   </div>;
 }
 

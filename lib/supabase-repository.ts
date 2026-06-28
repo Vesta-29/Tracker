@@ -72,6 +72,7 @@ function mapSchoolDirectoryEntry(row: any): SchoolDirectoryEntry {
   return {
     id: row.id,
     schoolId: row.school_id || "",
+    siteCode: row.site_code || "",
     schoolName: row.school_name,
     islandGroup: row.island_group || "",
     region: row.region_name || "",
@@ -82,30 +83,50 @@ function mapSchoolDirectoryEntry(row: any): SchoolDirectoryEntry {
     municipalityCode: row.municipality_code || "",
     barangay: row.barangay_name || "",
     barangayCode: row.barangay_code || "",
+    priority: row.priority_tag || "",
     sourceRow: row.source_row,
     warning: row.validation_warning || "",
   };
 }
 
+const schoolDirectoryColumns = "id,school_id,site_code,school_name,island_group,region_name,region_code,province_name,province_code,municipality_name,municipality_code,barangay_name,barangay_code,priority_tag,source_row,validation_warning";
+const legacySchoolDirectoryColumns = "id,school_id,school_name,island_group,region_name,region_code,province_name,province_code,municipality_name,municipality_code,barangay_name,barangay_code,source_row,validation_warning";
+function missingDirectoryColumn(error: unknown) {
+  return typeof error === "object" && error !== null && "message" in error && /site_code|priority_tag|column .* does not exist/i.test(String(error.message));
+}
+
 export async function searchSchoolDirectory(query: string) {
   const term = query.trim().replaceAll("%", "\\%").replaceAll("_", "\\_");
   if (term.length < 2) return [];
-  const { data, error } = await supabase().from("school_directory_entries").select("id,school_id,school_name,island_group,region_name,region_code,province_name,province_code,municipality_name,municipality_code,barangay_name,barangay_code,source_row,validation_warning").ilike("school_name", `%${term}%`).order("school_name").limit(10);
+  const { data, error } = await supabase().from("school_directory_entries").select(schoolDirectoryColumns).or(`school_name.ilike.%${term}%,school_id.ilike.%${term}%,site_code.ilike.%${term}%`).order("school_name").limit(10);
+  if (error && missingDirectoryColumn(error)) {
+    const legacy = await supabase().from("school_directory_entries").select(legacySchoolDirectoryColumns).or(`school_name.ilike.%${term}%,school_id.ilike.%${term}%`).order("school_name").limit(10);
+    if (legacy.error) throw legacy.error;
+    return legacy.data.map(mapSchoolDirectoryEntry);
+  }
   if (error) throw error;
   return data.map(mapSchoolDirectoryEntry);
 }
 
 export async function findSchoolDirectoryEntry(input: { schoolId?: string; schoolName?: string }) {
-  const columns = "id,school_id,school_name,island_group,region_name,region_code,province_name,province_code,municipality_name,municipality_code,barangay_name,barangay_code,source_row,validation_warning";
   const schoolId = input.schoolId?.trim();
   if (schoolId) {
-    const { data, error } = await supabase().from("school_directory_entries").select(columns).ilike("school_id", schoolId).limit(2);
-    if (error) throw error;
-    if (data.length === 1) return mapSchoolDirectoryEntry(data[0]);
+    const { data, error } = await supabase().from("school_directory_entries").select(schoolDirectoryColumns).ilike("school_id", schoolId).limit(2);
+    if (error && missingDirectoryColumn(error)) {
+      const legacy = await supabase().from("school_directory_entries").select(legacySchoolDirectoryColumns).ilike("school_id", schoolId).limit(2);
+      if (legacy.error) throw legacy.error;
+      if (legacy.data.length === 1) return mapSchoolDirectoryEntry(legacy.data[0]);
+    } else if (error) throw error;
+    else if (data.length === 1) return mapSchoolDirectoryEntry(data[0]);
   }
   const schoolName = input.schoolName?.trim();
   if (!schoolName) return null;
-  const { data, error } = await supabase().from("school_directory_entries").select(columns).ilike("school_name", schoolName).limit(2);
+  const { data, error } = await supabase().from("school_directory_entries").select(schoolDirectoryColumns).ilike("school_name", schoolName).limit(2);
+  if (error && missingDirectoryColumn(error)) {
+    const legacy = await supabase().from("school_directory_entries").select(legacySchoolDirectoryColumns).ilike("school_name", schoolName).limit(2);
+    if (legacy.error) throw legacy.error;
+    return legacy.data.length === 1 ? mapSchoolDirectoryEntry(legacy.data[0]) : null;
+  }
   if (error) throw error;
   return data.length === 1 ? mapSchoolDirectoryEntry(data[0]) : null;
 }

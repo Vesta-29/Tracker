@@ -229,6 +229,9 @@ h3 { font-size: 14px; margin: 0; }
 .field.search { min-width: 230px; padding-left: 34px; }
 .input-wrap { position: relative; }
 .input-icon { pointer-events: none; position: absolute; left: 10px; top: 10px; color: var(--ink-muted); }
+.verified-field-wrap { position: relative; display: block; }
+.verified-field-wrap .field { padding-right: 34px; }
+.field-check-icon { pointer-events: none; position: absolute; z-index: 2; right: 9px; top: 50%; width: 20px; height: 20px; padding: 2px; border: 1px solid oklch(0.78 0.06 164); border-radius: 999px; color: var(--accent); background: var(--accent-soft); transform: translateY(-50%); }
 .status-select-wrap { position: relative; display: block; }
 .status-select { padding-left: 32px; }
 .status-select-dot { pointer-events: none; position: absolute; z-index: 2; left: 12px; top: 50%; width: 9px; height: 9px; transform: translateY(-50%); box-shadow: 0 0 0 3px color-mix(in oklch, currentColor 10%, transparent); }

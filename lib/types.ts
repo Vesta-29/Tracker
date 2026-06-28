@@ -150,6 +150,7 @@ export type BeneficiaryContact = {
 export type SchoolDirectoryEntry = {
   id: string;
   schoolId: string;
+  siteCode: string;
   schoolName: string;
   islandGroup: IslandGroup | "";
   region: string;
@@ -160,6 +161,7 @@ export type SchoolDirectoryEntry = {
   municipalityCode: string;
   barangay: string;
   barangayCode: string;
+  priority: string;
   sourceRow: number;
   warning: string;
 };
