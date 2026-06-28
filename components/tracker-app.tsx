@@ -432,7 +432,7 @@ export default function TrackerApp() {
     function handleShortcuts(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
       const isTyping = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable);
-      const key = event.key.toLowerCase();
+      const key = (event.key ?? "").toLowerCase();
       if ((event.ctrlKey || event.metaKey) && key === "k") {
         event.preventDefault();
         document.querySelector<HTMLInputElement>("[data-site-search='true']")?.focus();
