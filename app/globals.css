@@ -278,7 +278,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .tabs span { min-width: 19px; padding: 2px 5px; border-radius: 99px; background: var(--surface-muted); color: var(--ink-muted); font-size: 11px; }
 .ownership-grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 14px; padding-top: 13px; padding-bottom: 13px; background: var(--surface-muted); }
 .ownership-grid div { display: grid; gap: 4px; }
-.site-fields { margin: 0; padding: 0 0 120px; }
+.site-fields { margin: 0; padding: 0 0 28px; }
 .site-fields:disabled { border-color: var(--line); }
 .site-fields.viewing > .section:not(.ownership-grid) { padding-top: 19px; padding-bottom: 19px; }
 .site-fields:disabled label { gap: 4px; }
@@ -325,11 +325,18 @@ tbody tr:last-child td { border-bottom: 0; }
 #site-details-section .grid-3, #site-location-section .site-field-container { min-width: 0; padding: 14px; border: 1px solid oklch(0.78 0.035 155); border-radius: 9px; background: oklch(0.985 0.006 155); }
 #site-location-section .section-title { margin-bottom: 16px; }
 #site-location-section .field-block { margin-top: 14px; }
-#remarks-photos-section .section-title { margin-bottom: 16px; }
-.remarks-photos-container { min-width: 0; padding: 14px; border: 1px solid oklch(0.78 0.035 155); border-radius: 9px; background: oklch(0.985 0.006 155); }
+.remarks-photos-section { padding-top: 16px; padding-bottom: 14px; }
+.remarks-photos-section.collapsed { min-height: 0; padding-top: 14px; padding-bottom: 14px; }
+#remarks-photos-section .section-title { align-items: start; margin-bottom: 10px; }
+.remarks-photos-section.collapsed .section-title { margin-bottom: 0; }
+.remarks-toggle { flex: 0 0 auto; min-height: 34px; padding: 0 10px; font-size: 12px; }
+.remarks-toggle svg { transition: transform 160ms var(--ease-out); }
+.remarks-toggle svg.open { transform: rotate(180deg); }
+.remarks-photos-container { min-width: 0; padding: 12px; border: 1px solid oklch(0.78 0.035 155); border-radius: 9px; background: oklch(0.985 0.006 155); }
 .remarks-photos-container > div { min-width: 0; }
 .remarks-photos-container .section-title.compact { align-items: center; margin-bottom: 10px; }
-.remarks-photo-dropzone { min-height: 126px; display: grid; align-content: center; justify-items: center; gap: 8px; background: oklch(0.99 0.006 155); }
+#remarks-input { min-height: 96px; resize: vertical; }
+.remarks-photo-dropzone { min-height: 96px; display: grid; align-content: center; justify-items: center; gap: 8px; background: oklch(0.99 0.006 155); }
 .remarks-photo-list { margin: 9px 0 0; overflow-wrap: anywhere; }
 .legacy-kit-prompt { display: grid; grid-template-columns: 1fr auto; gap: 4px 16px; align-items: center; padding: 12px 14px; }
 .legacy-kit-prompt .migration-label { color: var(--accent); font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
