@@ -3,7 +3,7 @@
 import { ChangeEvent, Dispatch, FormEvent, PointerEvent, SetStateAction, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
-  Activity, AlertTriangle, ArrowDownAZ, ArrowUpAZ, BarChart3, CalendarRange, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleDot, ClipboardCopy, ClipboardList, ClipboardPaste,
+  Activity, AlertTriangle, ArrowDownAZ, ArrowUp, ArrowUpAZ, BarChart3, CalendarRange, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleDot, ClipboardCopy, ClipboardList, ClipboardPaste,
   Download, FileSpreadsheet, GripVertical, History, ImagePlus, KeyRound, LogOut, MoreHorizontal, Package, Pencil, Pin, Plus, Power, RadioTower, Search, Wrench,
   Trash2, Users, X
 } from "lucide-react";
@@ -843,9 +843,41 @@ function SiteSortHeader({ label, column, sortable, sort, onSort, className }: { 
   const active = sort?.key === column;
   return <th className={className} aria-sort={active ? sort.direction === "asc" ? "ascending" : "descending" : "none"}><button type="button" className={`table-sort ${active ? "active" : ""}`} onClick={() => onSort(column)}>{label}{active && sort.direction === "desc" ? <ArrowDownAZ size={14} /> : <ArrowUpAZ size={14} />}</button></th>;
 }
+function paginationPages(currentPage: number, pageCount: number) {
+  if (pageCount <= 7) return Array.from({ length: pageCount }, (_, index) => index + 1);
+  if (currentPage <= 4) return [1, 2, 3, 4, 5, "ellipsis", pageCount] as const;
+  if (currentPage >= pageCount - 3) return [1, "ellipsis", pageCount - 4, pageCount - 3, pageCount - 2, pageCount - 1, pageCount] as const;
+  return [1, "ellipsis", currentPage - 1, currentPage, currentPage + 1, "ellipsis", pageCount] as const;
+}
+function PaginationControl({ currentPage, pageCount, pageSize, total, itemLabel, onPageChange, onPageSizeChange }: { currentPage: number; pageCount: number; pageSize: number; total: number; itemLabel: string; onPageChange: (page: number) => void; onPageSizeChange: (pageSize: number) => void }) {
+  const [goToPage, setGoToPage] = useState("");
+  const firstVisible = total ? (currentPage - 1) * pageSize + 1 : 0;
+  const lastVisible = Math.min(currentPage * pageSize, total);
+  function go(page: number) {
+    onPageChange(Math.max(1, Math.min(pageCount, page)));
+  }
+  function submitGoTo(event: FormEvent) {
+    event.preventDefault();
+    const page = Number(goToPage);
+    if (!Number.isInteger(page)) return;
+    go(page);
+    setGoToPage("");
+  }
+  return <div className="pagination" aria-label={`${itemLabel} pagination`}>
+    <span className="pagination-summary small muted">Showing {firstVisible}-{lastVisible} of {total} {itemLabel}</span>
+    <div className="pagination-controls">
+      <button type="button" className="pagination-arrow" aria-label="Previous page" disabled={currentPage === 1} onClick={() => go(currentPage - 1)}><ChevronLeft size={15} /></button>
+      <div className="pagination-pages" aria-label="Pages">{paginationPages(currentPage, pageCount).map((page, index) => page === "ellipsis" ? <span className="pagination-ellipsis" aria-hidden="true" key={`ellipsis-${index}`}>...</span> : <button type="button" className={`pagination-page-button ${page === currentPage ? "active" : ""}`} aria-current={page === currentPage ? "page" : undefined} key={page} onClick={() => go(page)}>{page}</button>)}</div>
+      <button type="button" className="pagination-arrow" aria-label="Next page" disabled={currentPage === pageCount} onClick={() => go(currentPage + 1)}><ChevronRight size={15} /></button>
+      <select className="select pagination-size" aria-label={`${itemLabel} per page`} value={pageSize} onChange={(event) => onPageSizeChange(Number(event.target.value))}>{[10, 20, 50, 100].map((size) => <option value={size} key={size}>{size} / page</option>)}</select>
+      <form className="pagination-go" onSubmit={submitGoTo}><label htmlFor={`go-to-${itemLabel.replace(/\s+/g, "-")}`}>Go to</label><input id={`go-to-${itemLabel.replace(/\s+/g, "-")}`} className="field" inputMode="numeric" pattern="[0-9]*" value={goToPage} onChange={(event) => setGoToPage(event.target.value.replace(/\D/g, ""))} /></form>
+    </div>
+  </div>;
+}
 function RecordsTable({ records, refs, filters, onClearFilters, onSelect, detailed = false, canEdit = true, onBulkUpdate, onDelete }: { records: Installation[]; refs?: ReferenceData; filters?: Filter; onClearFilters?: () => void; onSelect?: (r: Installation) => void; detailed?: boolean; canEdit?: boolean; onBulkUpdate?: (ids: string[], changes: { status?: Status; contractor?: string }) => Promise<void>; onDelete?: (record: Installation) => Promise<void> }) {
   const [sort, setSort] = useState<{ key: SiteSortKey; direction: "asc" | "desc" }>({ key: "createdAt", direction: "desc" });
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkStatus, setBulkStatus] = useState("");
   const [bulkContractor, setBulkContractor] = useState("");
@@ -854,7 +886,6 @@ function RecordsTable({ records, refs, filters, onClearFilters, onSelect, detail
   const [deleteCandidate, setDeleteCandidate] = useState<Installation>();
   const [deletingId, setDeletingId] = useState("");
   const sortable = detailed;
-  const pageSize = 20;
   const sortedRecords = useMemo(() => {
     if (!sort) return newestCreatedFirst(records);
     const read = (record: Installation) => sort.key === "location" ? `${record.barangay} ${record.municipality}` : sort.key === "equipment" ? record.components.length : sort.key === "siteCode" ? projectSiteCode(record) : record[sort.key];
@@ -872,8 +903,6 @@ function RecordsTable({ records, refs, filters, onClearFilters, onSelect, detail
   const pageCount = Math.max(1, Math.ceil(sortedRecords.length / pageSize));
   const currentPage = Math.min(page, pageCount);
   const visibleRecords = detailed ? sortedRecords.slice((currentPage - 1) * pageSize, currentPage * pageSize) : sortedRecords;
-  const firstVisible = sortedRecords.length ? (currentPage - 1) * pageSize + 1 : 0;
-  const lastVisible = Math.min(currentPage * pageSize, sortedRecords.length);
   const selectable = detailed && canEdit && Boolean(onBulkUpdate);
   const validSelectedIds = selectedIds.filter((id) => records.some((record) => record.id === id));
   const visibleIds = visibleRecords.map((record) => record.id);
@@ -893,6 +922,10 @@ function RecordsTable({ records, refs, filters, onClearFilters, onSelect, detail
   function toggleVisibleRows(checked: boolean) {
     setBulkReview(false);
     setSelectedIds((current) => checked ? Array.from(new Set([...current, ...visibleIds])) : current.filter((id) => !visibleIds.includes(id)));
+  }
+  function changePageSize(nextPageSize: number) {
+    setPageSize(nextPageSize);
+    setPage(1);
   }
   async function applyBulkUpdate() {
     if (!onBulkUpdate || !selectedUpdatableRecords.length || (!bulkStatus && !bulkContractor)) return;
@@ -940,7 +973,7 @@ function RecordsTable({ records, refs, filters, onClearFilters, onSelect, detail
         </tr></thead>
         <tbody>{visibleRecords.map((r) => <tr key={r.id} role={onSelect ? "button" : undefined} tabIndex={onSelect ? 0 : undefined} aria-label={onSelect ? `Open site ${r.siteName || r.id}` : undefined} onClick={() => { if (!hasActiveTextSelection()) onSelect?.(r); }} onKeyDown={(event) => onSelect && handleRowKeyboard(event, () => onSelect(r))} style={{ cursor: onSelect ? "pointer" : "default" }}>
           {selectable && <td className="site-select-column" onClick={(event) => event.stopPropagation()}><input type="checkbox" aria-label={`Select ${r.siteName || r.id}`} checked={validSelectedIds.includes(r.id)} onChange={(event) => { setBulkReview(false); setSelectedIds((current) => event.target.checked ? [...current, r.id] : current.filter((id) => id !== r.id)); }} /></td>}
-          <td className="site-identity-column">{r.siteName || <span className="pill issue">Site name required</span>}</td>
+          <td className="site-identity-column" title={r.siteName || undefined}>{r.siteName ? <span className="site-name-cell">{r.siteName}</span> : <span className="pill issue">Site name required</span>}</td>
           <td className="site-id-column"><strong>{r.id}</strong></td>
           {detailed && <td className="site-code-column secondary-site-column">{projectSiteCode(r)}</td>}
           {detailed && <td className="island-column secondary-site-column">{r.islandGroup || "None"}</td>}
@@ -953,7 +986,7 @@ function RecordsTable({ records, refs, filters, onClearFilters, onSelect, detail
         </tr>)}</tbody>
       </table>
     </div>
-    {detailed && <div className="pagination"><span className="small muted">Showing {firstVisible}-{lastVisible} of {sortedRecords.length} records | {pageSize} rows per page</span><div className="toolbar"><button type="button" className="button icon-button" aria-label="Previous page" disabled={currentPage === 1} onClick={() => setPage((current) => Math.max(1, current - 1))}><ChevronLeft size={16} /></button><span className="pagination-page small">Page {currentPage} of {pageCount}</span><button type="button" className="button icon-button" aria-label="Next page" disabled={currentPage === pageCount} onClick={() => setPage((current) => Math.min(pageCount, current + 1))}><ChevronRight size={16} /></button></div></div>}
+    {detailed && <PaginationControl currentPage={currentPage} pageCount={pageCount} pageSize={pageSize} total={sortedRecords.length} itemLabel="records" onPageChange={setPage} onPageSizeChange={changePageSize} />}
     {deleteCandidate && <div className="modal-backdrop" role="presentation"><div className="modal-panel" role="alertdialog" aria-modal="true" aria-labelledby="delete-site-row-title"><div className="modal-icon danger"><Trash2 size={20} /></div><h2 id="delete-site-row-title">Delete this site?</h2><p className="muted">{deleteCandidate.siteName || deleteCandidate.id} will be removed from the site registry.</p><div className="modal-actions"><button type="button" className="button" disabled={Boolean(deletingId)} onClick={() => setDeleteCandidate(undefined)}>Cancel</button><button type="button" className="button danger-solid" disabled={Boolean(deletingId)} onClick={() => void confirmDelete()}><Trash2 size={15} />{deletingId ? "Deleting..." : "Delete site"}</button></div></div></div>}
   </>;
 }
@@ -1022,14 +1055,16 @@ function ServiceVisitsPage({ records, refs, actorName, onSave, canEdit, routeRea
 
 function ServiceVisitTable({ visits, onSelect }: { visits: { installation: Installation; visit: ServiceVisit }[]; onSelect?: (installation: Installation, visit: ServiceVisit) => void }) {
   const [page, setPage] = useState(1);
-  const pageSize = 20;
+  const [pageSize, setPageSize] = useState(20);
   const pageCount = Math.max(1, Math.ceil(visits.length / pageSize));
   const currentPage = Math.min(page, pageCount);
   const visibleVisits = visits.slice((currentPage - 1) * pageSize, currentPage * pageSize);
-  const firstVisible = visits.length ? (currentPage - 1) * pageSize + 1 : 0;
-  const lastVisible = Math.min(currentPage * pageSize, visits.length);
+  function changePageSize(nextPageSize: number) {
+    setPageSize(nextPageSize);
+    setPage(1);
+  }
   if (!visits.length) return <div className="empty"><Wrench size={24} /><p><strong>No service visits match these filters.</strong></p></div>;
-  return <><div className="table-wrap service-visits-table-wrap"><table className="service-visits-table"><thead><tr><th>Visit</th><th>Site</th><th>Type</th><th>Ticket</th><th>Contractor</th><th>Scheduled</th><th>Status</th>{onSelect && <th><span className="sr-only">Actions</span></th>}</tr></thead><tbody>{visibleVisits.map(({ installation, visit }) => <tr key={visit.id} role={onSelect ? "button" : undefined} tabIndex={onSelect ? 0 : undefined} aria-label={onSelect ? `Open service visit ${visit.id}` : undefined} onClick={() => onSelect?.(installation, visit)} onKeyDown={(event) => onSelect && handleRowKeyboard(event, () => onSelect(installation, visit))} style={{ cursor: onSelect ? "pointer" : "default" }}><td><strong>{visit.id}</strong></td><td>{installation.siteName || installation.id}</td><td>{visit.type}</td><td>{visit.ticketReference || "None"}</td><td>{visit.contractor}</td><td>{niceDate(visit.scheduledDate)}</td><td><span className={`pill ${visit.status === "completed" ? "installed" : visit.status === "cancelled" ? "cancelled" : visit.status === "in_progress" ? "issue" : "scheduled"}`}>{serviceStatusLabels[visit.status]}</span></td>{onSelect && <td><button type="button" className="button icon-button ghost" aria-label={`View service visit ${visit.id}`} onClick={(event) => { event.stopPropagation(); onSelect(installation, visit); }}><ChevronRight size={16} /></button></td>}</tr>)}</tbody></table></div><div className="pagination"><span className="small muted">Showing {firstVisible}-{lastVisible} of {visits.length} visits | {pageSize} rows per page</span><div className="toolbar"><button type="button" className="button icon-button" aria-label="Previous page" disabled={currentPage === 1} onClick={() => setPage((current) => Math.max(1, current - 1))}><ChevronLeft size={16} /></button><span className="pagination-page small">Page {currentPage} of {pageCount}</span><button type="button" className="button icon-button" aria-label="Next page" disabled={currentPage === pageCount} onClick={() => setPage((current) => Math.min(pageCount, current + 1))}><ChevronRight size={16} /></button></div></div></>;
+  return <><div className="table-wrap service-visits-table-wrap"><table className="service-visits-table"><thead><tr><th>Visit</th><th>Site</th><th>Type</th><th>Ticket</th><th>Contractor</th><th>Scheduled</th><th>Status</th>{onSelect && <th><span className="sr-only">Actions</span></th>}</tr></thead><tbody>{visibleVisits.map(({ installation, visit }) => <tr key={visit.id} role={onSelect ? "button" : undefined} tabIndex={onSelect ? 0 : undefined} aria-label={onSelect ? `Open service visit ${visit.id}` : undefined} onClick={() => onSelect?.(installation, visit)} onKeyDown={(event) => onSelect && handleRowKeyboard(event, () => onSelect(installation, visit))} style={{ cursor: onSelect ? "pointer" : "default" }}><td><strong>{visit.id}</strong></td><td>{installation.siteName || installation.id}</td><td>{visit.type}</td><td>{visit.ticketReference || "None"}</td><td>{visit.contractor}</td><td>{niceDate(visit.scheduledDate)}</td><td><span className={`pill ${visit.status === "completed" ? "installed" : visit.status === "cancelled" ? "cancelled" : visit.status === "in_progress" ? "issue" : "scheduled"}`}>{serviceStatusLabels[visit.status]}</span></td>{onSelect && <td><button type="button" className="button icon-button ghost" aria-label={`View service visit ${visit.id}`} onClick={(event) => { event.stopPropagation(); onSelect(installation, visit); }}><ChevronRight size={16} /></button></td>}</tr>)}</tbody></table></div><PaginationControl currentPage={currentPage} pageCount={pageCount} pageSize={pageSize} total={visits.length} itemLabel="visits" onPageChange={setPage} onPageSizeChange={changePageSize} /></>;
 }
 
 function AuditTimeline({ events }: { events: AuditEvent[] }) {
@@ -1177,6 +1212,7 @@ function InstallationForm({
   const [siteDetailsCopyState, setSiteDetailsCopyState] = useState<"idle" | "project" | "error">("idle");
   const [copiedEquipmentField, setCopiedEquipmentField] = useState("");
   const [extractionHighlights, setExtractionHighlights] = useState<string[]>([]);
+  const [showScrollTop, setShowScrollTop] = useState(false);
   const validationSummaryRef = useRef<HTMLDivElement>(null);
   useBlobUrlCleanup(record.photos);
 
@@ -1186,6 +1222,15 @@ function InstallationForm({
   }, [record, original]);
   const patch = (data: Partial<Installation>) => setRecord((r) => ({ ...r, ...data }));
   const extractionHighlight = (key: string) => extractionHighlights.includes(key) ? " extraction-filled" : "";
+
+  useEffect(() => {
+    function updateScrollTopVisibility() {
+      setShowScrollTop(window.scrollY > 520);
+    }
+    updateScrollTopVisibility();
+    window.addEventListener("scroll", updateScrollTopVisibility, { passive: true });
+    return () => window.removeEventListener("scroll", updateScrollTopVisibility);
+  }, []);
 
   useEffect(() => {
     if (!schoolLookupOpen || record.siteName.trim().length < 2) return;
@@ -1555,6 +1600,10 @@ function InstallationForm({
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     document.getElementById(id)?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
   }
+  function scrollToRecordTop() {
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    window.scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" });
+  }
   function focusValidationTarget(id: string) {
     const target = document.getElementById(id);
     target?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -1827,6 +1876,7 @@ function InstallationForm({
     </fieldset>}
     {tab === "visits" && <div id="site-panel-visits" aria-labelledby="site-tab-visits" className="panel" role="tabpanel"><div className="panel-head"><div><h2>Service visits</h2><div className="small muted">Contractor revisits, maintenance, and equipment changes</div></div>{!readOnly && <button type="button" className="button primary" onClick={() => navigate(`/service-visits/new?site=${encodeURIComponent(record.id)}&returnTo=${encodeURIComponent(`/sites/${record.id}`)}`)}><Plus size={15} />New service visit</button>}</div>{visitsLoading ? <div className="section muted">Loading service visits...</div> : visitsError ? <div className="section notice validation-notice"><strong>Unable to load service visits.</strong> {visitsError}</div> : <ServiceVisitTable visits={serviceVisits.map((visit) => ({ installation: record, visit }))} onSelect={(_, visit) => navigate(`/service-visits/${encodeURIComponent(visit.id)}?returnTo=${encodeURIComponent(`/sites/${record.id}`)}`)} />}</div>}
     {tab === "audit" && <div id="site-panel-audit" aria-labelledby="site-tab-audit" className="panel" role="tabpanel"><div className="panel-head"><div><h2>Change log</h2><div className="small muted">Permanent history of record updates and service activity</div></div><History size={18} className="muted" /></div>{auditLoading ? <div className="section muted">Loading change log...</div> : auditError ? <div className="section notice validation-notice"><strong>Unable to load the change log.</strong> {auditError}</div> : <AuditTimeline events={auditEvents} />}</div>}
+    {tab === "overview" && showScrollTop && <button type="button" className="button icon-button site-scroll-top" aria-label="Go to top of site record" title="Go to top" onClick={scrollToRecordTop}><ArrowUp size={17} /></button>}
     {deleteComponentId && <DeleteComponentModal component={record.components.find((component) => component.id === deleteComponentId)} onCancel={() => setDeleteComponentId(undefined)} onConfirm={() => deleteComponent(deleteComponentId)} />}
     {showDeleteModal && initial && (
       <div className="modal-backdrop" role="presentation">
