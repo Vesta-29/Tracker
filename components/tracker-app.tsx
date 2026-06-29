@@ -193,8 +193,19 @@ function referenceNamesChanged(current: ReferenceData, previous: ReferenceData) 
     || JSON.stringify(names(current.serviceVisitTypes)) !== JSON.stringify(names(previous.serviceVisitTypes))
     || JSON.stringify(current.siteStatuses.map(({ value, name, color }) => ({ value, name, color }))) !== JSON.stringify(previous.siteStatuses.map(({ value, name, color }) => ({ value, name, color })));
 }
-function niceDate(value: string) { return new Intl.DateTimeFormat("en-PH", { timeZone: appTimeZone, month: "short", day: "numeric", year: "numeric" }).format(new Date(value)); }
-function niceDateTime(value: string) { return new Intl.DateTimeFormat("en-PH", { timeZone: appTimeZone, month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(value)); }
+function validDate(value?: string) {
+  if (!value) return undefined;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+function niceDate(value?: string) {
+  const date = validDate(value);
+  return date ? new Intl.DateTimeFormat("en-PH", { timeZone: appTimeZone, month: "short", day: "numeric", year: "numeric" }).format(date) : "None";
+}
+function niceDateTime(value?: string) {
+  const date = validDate(value);
+  return date ? new Intl.DateTimeFormat("en-PH", { timeZone: appTimeZone, month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }).format(date) : "None";
+}
 function newestCreatedFirst<T extends { createdAt?: string }>(items: T[]) { return [...items].sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || "")); }
 function useEscape(onEscape: () => void, active = true) {
   useEffect(() => {
