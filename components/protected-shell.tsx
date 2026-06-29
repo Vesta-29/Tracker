@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { ChevronDown, ClipboardList, KeyRound, LayoutDashboard, LogOut, Menu, Pencil, RadioTower, Settings, Upload, Wrench, X } from "lucide-react";
+import { ChevronDown, ClipboardList, KeyRound, LayoutDashboard, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Pencil, RadioTower, Settings, Upload, Wrench, X } from "lucide-react";
 import { changePassword, signOut, updateOwnProfile } from "@/lib/supabase-repository";
 import type { Profile } from "@/lib/types";
 import { ChangeDisplayNameModal, ChangePasswordModal, ConfirmLogoutModal, invalidateRouteWorkspaceCache } from "@/components/tracker-app";
@@ -43,6 +43,7 @@ function ProtectedShellContent({ initialProfile, children }: { initialProfile: P
   const navigate = useGuardedNavigation();
   const [profile, setProfile] = useState(initialProfile);
   const [mobileMenu, setMobileMenu] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => typeof window !== "undefined" && window.localStorage.getItem("fieldtrack:sidebar-collapsed") === "true");
   const [accountMenu, setAccountMenu] = useState(false);
   const [nameModal, setNameModal] = useState(false);
   const [passwordModal, setPasswordModal] = useState(false);
@@ -52,6 +53,9 @@ function ProtectedShellContent({ initialProfile, children }: { initialProfile: P
   const accountItemsRef = useRef<HTMLDivElement>(null);
   const notify = (message: string) => { setToast(message); setTimeout(() => setToast(""), 3000); };
   const availableNav = profile.role === "admin" ? nav : nav.filter((item) => item.href !== "/admin/contractors" && (profile.role !== "guest" || item.href !== "/import"));
+  useEffect(() => {
+    window.localStorage.setItem("fieldtrack:sidebar-collapsed", String(sidebarCollapsed));
+  }, [sidebarCollapsed]);
   useEscape(() => setMobileMenu(false), mobileMenu);
   useEscape(() => setAccountMenu(false), accountMenu);
   useEscape(() => setNameModal(false), nameModal);
@@ -78,11 +82,12 @@ function ProtectedShellContent({ initialProfile, children }: { initialProfile: P
     else if (event.key === "End") moveAccountFocus(event, "last");
   }
   function openRoute(href: string) { navigate(href); setMobileMenu(false); }
-  return <div className="app-shell">
+  const SidebarToggleIcon = sidebarCollapsed ? PanelLeftOpen : PanelLeftClose;
+  return <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
     <DialogFocusManager />
     <aside className="sidebar">
-      <div className="brand"><span className="brand-mark"><RadioTower size={17} /></span>FieldTrack</div>
-      <div className="nav">{availableNav.map(({ href, label, icon: Icon }) => { const active = activeRoute(pathname, href); return <button className={active ? "active" : ""} aria-current={active ? "page" : undefined} key={href} onClick={() => openRoute(href)}><Icon size={17} />{label}</button>; })}</div>
+      <div className="brand"><span className="brand-mark"><RadioTower size={17} /></span><span className="brand-name">FieldTrack</span><button type="button" className="sidebar-toggle" aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} aria-pressed={sidebarCollapsed} onClick={() => setSidebarCollapsed((collapsed) => !collapsed)} title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}><SidebarToggleIcon size={16} /></button></div>
+      <div className="nav">{availableNav.map(({ href, label, icon: Icon }) => { const active = activeRoute(pathname, href); return <button className={active ? "active" : ""} aria-current={active ? "page" : undefined} aria-label={label} title={sidebarCollapsed ? label : undefined} key={href} onClick={() => openRoute(href)}><Icon size={17} /><span>{label}</span></button>; })}</div>
     </aside>
     <main className="main">
       <header className="topbar">
