@@ -260,6 +260,8 @@ h3 { font-size: 14px; margin: 0; }
 label { display: grid; gap: 6px; color: var(--ink-muted); font-size: 12px; font-weight: 700; }
 .table-wrap { overflow-x: auto; }
 .sites-table-wrap { position: relative; }
+.site-row-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 4px; }
+.site-row-actions .button { width: 34px; height: 34px; min-height: 34px; }
 tbody tr[role="button"]:focus-visible { outline: 3px solid oklch(0.72 0.11 164 / .34); outline-offset: -3px; background: var(--accent-soft); }
 .shortcut-hint { margin: -10px 0 12px; }
 .bulk-action-bar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 12px; border-bottom: 1px solid var(--line); background: oklch(0.972 0.024 155); }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { ChevronDown, ClipboardList, KeyRound, LayoutDashboard, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Pencil, RadioTower, Settings, Upload, Wrench, X } from "lucide-react";
 import { changePassword, signOut, updateOwnProfile } from "@/lib/supabase-repository";
@@ -16,6 +16,9 @@ const nav = [
   { href: "/import", label: "Import sites", icon: Upload },
   { href: "/admin/contractors", label: "Admin settings", icon: Settings },
 ] as const;
+
+const sidebarStorageKey = "fieldtrack:sidebar-collapsed";
+const sidebarStorageEvent = "fieldtrack-sidebar-collapsed";
 
 function activeRoute(pathname: string, href: string) {
   if (href === "/sites") return pathname.startsWith("/sites");
@@ -33,6 +36,21 @@ function useEscape(onEscape: () => void, active = true) {
   }, [active, onEscape]);
 }
 
+function subscribeSidebarPreference(callback: () => void) {
+  window.addEventListener("storage", callback);
+  window.addEventListener(sidebarStorageEvent, callback);
+  return () => {
+    window.removeEventListener("storage", callback);
+    window.removeEventListener(sidebarStorageEvent, callback);
+  };
+}
+function sidebarPreferenceSnapshot() {
+  return window.localStorage.getItem(sidebarStorageKey) === "true";
+}
+function serverSidebarPreferenceSnapshot() {
+  return false;
+}
+
 export default function ProtectedShell({ initialProfile, children }: { initialProfile: Profile; children: React.ReactNode }) {
   return <GuardedNavigationProvider><ProtectedShellContent initialProfile={initialProfile}>{children}</ProtectedShellContent></GuardedNavigationProvider>;
 }
@@ -43,7 +61,7 @@ function ProtectedShellContent({ initialProfile, children }: { initialProfile: P
   const navigate = useGuardedNavigation();
   const [profile, setProfile] = useState(initialProfile);
   const [mobileMenu, setMobileMenu] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => typeof window !== "undefined" && window.localStorage.getItem("fieldtrack:sidebar-collapsed") === "true");
+  const sidebarCollapsed = useSyncExternalStore(subscribeSidebarPreference, sidebarPreferenceSnapshot, serverSidebarPreferenceSnapshot);
   const [accountMenu, setAccountMenu] = useState(false);
   const [nameModal, setNameModal] = useState(false);
   const [passwordModal, setPasswordModal] = useState(false);
@@ -53,9 +71,6 @@ function ProtectedShellContent({ initialProfile, children }: { initialProfile: P
   const accountItemsRef = useRef<HTMLDivElement>(null);
   const notify = (message: string) => { setToast(message); setTimeout(() => setToast(""), 3000); };
   const availableNav = profile.role === "admin" ? nav : nav.filter((item) => item.href !== "/admin/contractors" && (profile.role !== "guest" || item.href !== "/import"));
-  useEffect(() => {
-    window.localStorage.setItem("fieldtrack:sidebar-collapsed", String(sidebarCollapsed));
-  }, [sidebarCollapsed]);
   useEscape(() => setMobileMenu(false), mobileMenu);
   useEscape(() => setAccountMenu(false), accountMenu);
   useEscape(() => setNameModal(false), nameModal);
@@ -82,11 +97,15 @@ function ProtectedShellContent({ initialProfile, children }: { initialProfile: P
     else if (event.key === "End") moveAccountFocus(event, "last");
   }
   function openRoute(href: string) { navigate(href); setMobileMenu(false); }
+  function toggleSidebarCollapsed() {
+    window.localStorage.setItem(sidebarStorageKey, String(!sidebarCollapsed));
+    window.dispatchEvent(new Event(sidebarStorageEvent));
+  }
   const SidebarToggleIcon = sidebarCollapsed ? PanelLeftOpen : PanelLeftClose;
   return <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
     <DialogFocusManager />
     <aside className="sidebar">
-      <div className="brand"><span className="brand-mark"><RadioTower size={17} /></span><span className="brand-name">FieldTrack</span><button type="button" className="sidebar-toggle" aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} aria-pressed={sidebarCollapsed} onClick={() => setSidebarCollapsed((collapsed) => !collapsed)} title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}><SidebarToggleIcon size={16} /></button></div>
+      <div className="brand"><span className="brand-mark"><RadioTower size={17} /></span><span className="brand-name">FieldTrack</span><button type="button" className="sidebar-toggle" aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} aria-pressed={sidebarCollapsed} onClick={toggleSidebarCollapsed} title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}><SidebarToggleIcon size={16} /></button></div>
       <div className="nav">{availableNav.map(({ href, label, icon: Icon }) => { const active = activeRoute(pathname, href); return <button className={active ? "active" : ""} aria-current={active ? "page" : undefined} aria-label={label} title={sidebarCollapsed ? label : undefined} key={href} onClick={() => openRoute(href)}><Icon size={17} /><span>{label}</span></button>; })}</div>
     </aside>
     <main className="main">
