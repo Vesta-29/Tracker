@@ -206,7 +206,17 @@ function niceDateTime(value?: string) {
   const date = validDate(value);
   return date ? new Intl.DateTimeFormat("en-PH", { timeZone: appTimeZone, month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }).format(date) : "None";
 }
-function newestCreatedFirst<T extends { createdAt?: string }>(items: T[]) { return [...items].sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || "")); }
+function dateTimeValue(value?: string) {
+  const date = validDate(value);
+  return date ? date.getTime() : 0;
+}
+function newestCreatedFirst<T extends { createdAt?: string; updatedAt?: string; id?: string }>(items: T[]) {
+  return [...items].sort((a, b) =>
+    (dateTimeValue(b.createdAt) - dateTimeValue(a.createdAt))
+    || (dateTimeValue(b.updatedAt) - dateTimeValue(a.updatedAt))
+    || String(b.id ?? "").localeCompare(String(a.id ?? ""), undefined, { numeric: true, sensitivity: "base" })
+  );
+}
 function useEscape(onEscape: () => void, active = true) {
   useEffect(() => {
     if (!active) return;
@@ -267,6 +277,7 @@ function useModalAccessibility() {
 }
 function activeOptions(options: ReferenceOption[], selected?: string) { return options.filter((option) => option.active || option.name === selected); }
 function normalizeMac(value: string) { const compact = value.replace(/[:-]/g, "").trim().toUpperCase(); return /^[0-9A-F]{12}$/.test(compact) ? compact.match(/.{2}/g)!.join(":") : ""; }
+function normalizeDirectoryText(value: string) { return value.trim().replace(/\s+/g, " ").toLowerCase(); }
 function validInteger(value: string) { return /^-?\d+$/.test(value.trim()); }
 function validCoordinate(value: string, min: number, max: number) { const trimmed = value.trim(); if (!trimmed || !/^-?\d+(\.\d+)?$/.test(trimmed)) return false; const parsed = Number(trimmed); return Number.isFinite(parsed) && parsed >= min && parsed <= max; }
 function validPhone(value: string) { const trimmed = value.trim(); const digits = trimmed.replace(/\D/g, ""); return digits.length >= 7 && digits.length <= 15 && /^[+()\d\s.-]+$/.test(trimmed); }
@@ -481,8 +492,8 @@ export default function TrackerApp() {
     (!filters.provinceCode || r.provinceCode === filters.provinceCode) &&
     (!filters.municipalityCode || r.municipalityCode === filters.municipalityCode) &&
     (!filters.barangayCode || r.barangayCode === filters.barangayCode) &&
-    (!filters.from || r.installDate >= filters.from) &&
-    (!filters.to || r.installDate <= filters.to) &&
+    (!filters.from || (r.activationDate ?? "") >= filters.from) &&
+    (!filters.to || (r.activationDate ?? "") <= filters.to) &&
     (!filters.attention || (filters.attention === "missingName" ? !r.siteName : Boolean(r.legacyKitNumber)))
   )), [records, filters]);
 
@@ -681,7 +692,7 @@ function DateRangeFilter({ from, to, minDate, maxDate, onChange, ariaLabel }: { 
 
 function siteFilterLabels(filters: Filter, refs: ReferenceData, records: Installation[]) {
   const activeLocationCount = [filters.islandGroup, filters.regionCode, filters.provinceCode, filters.municipalityCode, filters.barangayCode].filter(Boolean).length;
-  const dates = records.map((record) => record.installDate).filter(Boolean);
+  const dates = records.map((record) => record.activationDate).filter((date): date is string => Boolean(date));
   const minDate = dates.length ? dates.reduce((a, b) => (a < b ? a : b)) : "";
   const maxDate = dates.length ? dates.reduce((a, b) => (a > b ? a : b)) : "";
   const statusLabel = filters.status ? siteStatusLabel(filters.status as Status, refs) : "";
@@ -691,7 +702,7 @@ function siteFilterLabels(filters: Filter, refs: ReferenceData, records: Install
     filters.contractor && `Contractor: ${filters.contractor}`,
     filters.updatedBy && `Updated by: ${filters.updatedBy}`,
     activeLocationCount && `${activeLocationCount} location ${activeLocationCount === 1 ? "filter" : "filters"}`,
-    (filters.from || filters.to) && `Installed: ${filters.from || minDate || "start"} to ${filters.to || maxDate || "end"}`,
+    (filters.from || filters.to) && `Activated: ${filters.from || minDate || "start"} to ${filters.to || maxDate || "end"}`,
     filters.attention && (filters.attention === "missingName" ? "Queue: imported sites missing names" : "Queue: old kit numbers awaiting assignment"),
   ].filter(Boolean) as string[];
 }
@@ -706,7 +717,7 @@ function FilterBar({ records, refs, filters, setFilters, compact = false, matchi
   const [savingView, setSavingView] = useState(false);
   const [viewName, setViewName] = useState("");
   const [selectedSavedViewId, setSelectedSavedViewId] = useState("");
-  const installDates = records.map((record) => record.installDate).filter(Boolean);
+  const installDates = records.map((record) => record.activationDate).filter((date): date is string => Boolean(date));
   const minDate = installDates.length ? installDates.reduce((a, b) => (a < b ? a : b)) : "";
   const maxDate = installDates.length ? installDates.reduce((a, b) => (a > b ? a : b)) : "";
   const uniqueLocations = <T extends { code: string }>(items: T[]) => Array.from(new Map(items.map((item) => [item.code, item])).values());
@@ -773,14 +784,14 @@ function FilterBar({ records, refs, filters, setFilters, compact = false, matchi
     {savedViews.length > 0 && <div className="saved-view-control"><select className="select saved-view-select" aria-label="Apply saved site filter" value={selectedSavedViewId} onChange={(event) => applySavedView(event.target.value)}><option value="">Saved views</option>{savedViews.map((view) => <option value={view.id} key={view.id}>{view.name}</option>)}</select><button type="button" className="button icon-button ghost saved-view-delete" disabled={!selectedSavedViewId} aria-label="Delete selected saved view" title="Delete selected saved view" onClick={deleteSelectedSavedView}><Trash2 size={15} /></button></div>}
     <select className="select" aria-label="Filter sites by contractor" value={filters.contractor} onChange={(e) => setFilters({ ...filters, contractor: e.target.value })}><option value="">All contractors</option>{refs.contractors.map((c) => <option key={c.id}>{c.name}</option>)}</select>
     {!promoteUpdatedDate && <select className="select updated-by-filter" aria-label="Filter sites by updated by" value={filters.updatedBy} onChange={(e) => setFilters({ ...filters, updatedBy: e.target.value })}><option value="">Updated by</option>{updatedByOptions.map((name) => <option key={name}>{name}</option>)}</select>}
-    {!promoteUpdatedDate && <DateRangeFilter from={filters.from} to={filters.to} minDate={minDate} maxDate={maxDate} onChange={(range) => setFilters({ ...filters, ...range })} ariaLabel="Filter sites by config date" />}
+    {!promoteUpdatedDate && <DateRangeFilter from={filters.from} to={filters.to} minDate={minDate} maxDate={maxDate} onChange={(range) => setFilters({ ...filters, ...range })} ariaLabel="Filter sites by activation date" />}
     {locationFilters}
   </div>;
   return <div className="filter-stack">
     <div className="toolbar filter-row filter-primary-row">
       <div className="input-wrap"><Search className="input-icon" size={17} /><input className="field search" data-site-search="true" aria-label="Search sites" value={searchDraft} onChange={(e) => setSearchDraft(e.target.value)} placeholder="Search site, school ID, or location" /></div>
       {promoteUpdatedDate && <select className="select updated-by-filter" aria-label="Filter sites by updated by" value={filters.updatedBy} onChange={(e) => setFilters({ ...filters, updatedBy: e.target.value })}><option value="">Updated by</option>{updatedByOptions.map((name) => <option key={name}>{name}</option>)}</select>}
-      {promoteUpdatedDate && <DateRangeFilter from={filters.from} to={filters.to} minDate={minDate} maxDate={maxDate} onChange={(range) => setFilters({ ...filters, ...range })} ariaLabel="Filter sites by config date" />}
+      {promoteUpdatedDate && <DateRangeFilter from={filters.from} to={filters.to} minDate={minDate} maxDate={maxDate} onChange={(range) => setFilters({ ...filters, ...range })} ariaLabel="Filter sites by activation date" />}
       <button type="button" className={`button advanced-filter-trigger ${advanced || secondaryFilterCount ? "active" : ""}`} aria-expanded={advanced} onClick={() => setAdvanced((open) => !open)}>More filters{secondaryFilterCount > 0 && <span>{secondaryFilterCount}</span>}<ChevronDown size={14} /></button>
     </div>
     <div className="status-filter-row" role="group" aria-label="Filter sites by status">
@@ -826,14 +837,14 @@ function Installations({ records, allRecords, refs, filters, setFilters, startEd
   </>;
 }
 
-type SiteSortKey = "siteName" | "id" | "siteCode" | "islandGroup" | "location" | "unitType" | "contractor" | "installDate" | "activationDate" | "status" | "equipment" | "updatedBy";
+type SiteSortKey = "siteName" | "id" | "siteCode" | "islandGroup" | "location" | "unitType" | "contractor" | "installDate" | "activationDate" | "status" | "equipment" | "updatedBy" | "createdAt";
 function SiteSortHeader({ label, column, sortable, sort, onSort, className }: { label: string; column: SiteSortKey; sortable: boolean; sort?: { key: SiteSortKey; direction: "asc" | "desc" }; onSort: (key: SiteSortKey) => void; className?: string }) {
   if (!sortable) return <th className={className}>{label}</th>;
   const active = sort?.key === column;
   return <th className={className} aria-sort={active ? sort.direction === "asc" ? "ascending" : "descending" : "none"}><button type="button" className={`table-sort ${active ? "active" : ""}`} onClick={() => onSort(column)}>{label}{active && sort.direction === "desc" ? <ArrowDownAZ size={14} /> : <ArrowUpAZ size={14} />}</button></th>;
 }
 function RecordsTable({ records, refs, filters, onClearFilters, onSelect, detailed = false, canEdit = true, onBulkUpdate, onDelete }: { records: Installation[]; refs?: ReferenceData; filters?: Filter; onClearFilters?: () => void; onSelect?: (r: Installation) => void; detailed?: boolean; canEdit?: boolean; onBulkUpdate?: (ids: string[], changes: { status?: Status; contractor?: string }) => Promise<void>; onDelete?: (record: Installation) => Promise<void> }) {
-  const [sort, setSort] = useState<{ key: SiteSortKey; direction: "asc" | "desc" }>();
+  const [sort, setSort] = useState<{ key: SiteSortKey; direction: "asc" | "desc" }>({ key: "createdAt", direction: "desc" });
   const [page, setPage] = useState(1);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkStatus, setBulkStatus] = useState("");
@@ -845,11 +856,16 @@ function RecordsTable({ records, refs, filters, onClearFilters, onSelect, detail
   const sortable = detailed;
   const pageSize = 20;
   const sortedRecords = useMemo(() => {
-    if (!sort) return records;
+    if (!sort) return newestCreatedFirst(records);
     const read = (record: Installation) => sort.key === "location" ? `${record.barangay} ${record.municipality}` : sort.key === "equipment" ? record.components.length : sort.key === "siteCode" ? projectSiteCode(record) : record[sort.key];
     return records.map((record, index) => ({ record, index })).sort((a, b) => {
-      const left = read(a.record); const right = read(b.record);
-      const compared = typeof left === "number" && typeof right === "number" ? left - right : String(left ?? "").localeCompare(String(right ?? ""), undefined, { numeric: true, sensitivity: "base" });
+      const left = read(a.record);
+      const right = read(b.record);
+      const compared = sort.key === "createdAt"
+        ? dateTimeValue(String(left ?? "")) - dateTimeValue(String(right ?? ""))
+        : typeof left === "number" && typeof right === "number"
+          ? left - right
+          : String(left ?? "").localeCompare(String(right ?? ""), undefined, { numeric: true, sensitivity: "base" });
       return (sort.direction === "asc" ? compared : -compared) || a.index - b.index;
     }).map(({ record }) => record);
   }, [records, sort]);
@@ -864,15 +880,30 @@ function RecordsTable({ records, refs, filters, onClearFilters, onSelect, detail
   const selectedRecords = sortedRecords.filter((record) => validSelectedIds.includes(record.id));
   const selectedUpdatableRecords = selectedRecords.filter((record) => record.dbId);
   const visibleSelected = visibleIds.length > 0 && visibleIds.every((id) => validSelectedIds.includes(id));
-  function toggleSort(key: SiteSortKey) { if (!sortable) return; setPage(1); setSort((current) => current?.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: "asc" }); }
-  function toggleVisibleRows(checked: boolean) { setBulkReview(false); setSelectedIds((current) => checked ? Array.from(new Set([...current, ...visibleIds])) : current.filter((id) => !visibleIds.includes(id))); }
+  const filterLabels = filters && refs ? siteFilterLabels(filters, refs, records) : [];
+  const sortHeader = (label: string, column: SiteSortKey, className?: string) => <SiteSortHeader label={label} column={column} sortable={sortable} sort={sort} onSort={toggleSort} className={className} />;
+  const bulkChangeSummary = [bulkStatus && `Status to ${siteStatusLabel(bulkStatus as Status, refs)}`, bulkContractor && `Contractor to ${bulkContractor}`].filter(Boolean).join(" and ");
+  const selectionNote = selectedUpdatableRecords.length < selectedRecords.length ? `${selectedUpdatableRecords.length} can be updated` : "";
+
+  function toggleSort(key: SiteSortKey) {
+    if (!sortable) return;
+    setPage(1);
+    setSort((current) => current?.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: key === "createdAt" ? "desc" : "asc" });
+  }
+  function toggleVisibleRows(checked: boolean) {
+    setBulkReview(false);
+    setSelectedIds((current) => checked ? Array.from(new Set([...current, ...visibleIds])) : current.filter((id) => !visibleIds.includes(id)));
+  }
   async function applyBulkUpdate() {
     if (!onBulkUpdate || !selectedUpdatableRecords.length || (!bulkStatus && !bulkContractor)) return;
     if (!bulkReview) { setBulkReview(true); return; }
     setBulkSaving(true);
     try {
       await onBulkUpdate(selectedUpdatableRecords.map((record) => record.dbId) as string[], { status: bulkStatus as Status || undefined, contractor: bulkContractor || undefined });
-      setSelectedIds([]); setBulkStatus(""); setBulkContractor(""); setBulkReview(false);
+      setSelectedIds([]);
+      setBulkStatus("");
+      setBulkContractor("");
+      setBulkReview(false);
     } catch { } finally { setBulkSaving(false); }
   }
   async function confirmDelete() {
@@ -885,14 +916,46 @@ function RecordsTable({ records, refs, filters, onClearFilters, onSelect, detail
       setDeletingId("");
     }
   }
-  const filterLabels = filters && refs ? siteFilterLabels(filters, refs, records) : [];
-  if (!records.length) return <div className="empty site-list-empty"><ClipboardList size={25} /><p><strong>No sites match these filters.</strong></p>{filterLabels.length > 0 && <span className="empty-filter-summary">{filterLabels.join(" | ")}</span>}<div className="empty-actions">{onClearFilters && <button type="button" className="button" onClick={onClearFilters}><X size={15} />Clear all filters</button>}{canEdit && <span>Add a site if this record has not been encoded yet.</span>}</div></div>;
-  const sortHeader = (label: string, column: SiteSortKey, className?: string) => <SiteSortHeader label={label} column={column} sortable={sortable} sort={sort} onSort={toggleSort} className={className} />;
-  const tableDateKey: SiteSortKey = detailed ? "installDate" : "activationDate";
-  const tableDateLabel = detailed ? "Config date" : "Activation date";
-  const bulkChangeSummary = [bulkStatus && `Status to ${siteStatusLabel(bulkStatus as Status, refs)}`, bulkContractor && `Contractor to ${bulkContractor}`].filter(Boolean).join(" and ");
-  const selectionNote = selectedUpdatableRecords.length < selectedRecords.length ? `${selectedUpdatableRecords.length} can be updated` : "";
-  return <>{selectable && selectedRecords.length > 0 && <div className="bulk-action-bar" role="region" aria-label="Bulk site actions"><div className="bulk-action-summary"><strong>{selectedRecords.length} selected</strong>{selectionNote && <span>{selectionNote}</span>}{bulkReview && bulkChangeSummary && <span>Confirm: change {selectedUpdatableRecords.length} {selectedUpdatableRecords.length === 1 ? "site" : "sites"}: {bulkChangeSummary}.</span>}</div><select className="select" aria-label="Bulk update status" value={bulkStatus} onChange={(event) => { setBulkReview(false); setBulkStatus(event.target.value); }}><option value="">Keep status</option>{siteStatusOptions(refs).map((status) => <option value={status.value} key={status.value}>{status.name}</option>)}</select><select className="select" aria-label="Bulk update contractor" value={bulkContractor} onChange={(event) => { setBulkReview(false); setBulkContractor(event.target.value); }}><option value="">Keep contractor</option>{(refs?.contractors ?? []).filter((contractor) => contractor.active || selectedRecords.some((record) => record.contractor === contractor.name)).map((contractor) => <option key={contractor.id}>{contractor.name}</option>)}</select><button type="button" className="button primary" disabled={bulkSaving || !selectedUpdatableRecords.length || (!bulkStatus && !bulkContractor)} onClick={() => void applyBulkUpdate()}>{bulkSaving ? "Updating..." : bulkReview ? "Confirm update" : "Review changes"}</button><button type="button" className="button ghost" disabled={bulkSaving} onClick={() => { setBulkReview(false); setSelectedIds([]); }}>Clear selection</button></div>}<div className={`table-wrap ${detailed ? "sites-table-wrap" : ""}`}><table className={detailed ? "sites-table" : undefined}><thead><tr>{selectable && <th className="site-select-column"><input type="checkbox" aria-label="Select visible site rows" checked={visibleSelected} onChange={(event) => toggleVisibleRows(event.target.checked)} /></th>}{sortHeader("Site name", "siteName", "site-identity-column")}{sortHeader("School ID", "id", "site-id-column")}{detailed && sortHeader("Site Code", "siteCode", "site-code-column secondary-site-column")}{detailed && sortHeader("Island group", "islandGroup", "island-column secondary-site-column")}{sortHeader("Location", "location", "site-location-column")}{sortHeader(tableDateLabel, tableDateKey, "install-date-column")}{sortHeader("Status", "status", "site-status-column")}{detailed && sortHeader("Updated by", "updatedBy", "updated-by-column secondary-site-column")}{!detailed && sortHeader("Contractor", "contractor", "site-contractor-column")}{(onSelect || (canEdit && onDelete)) && <th className="site-actions-column"><span className="sr-only">Actions</span></th>}</tr></thead><tbody>{visibleRecords.map((r) => <tr key={r.id} role={onSelect ? "button" : undefined} tabIndex={onSelect ? 0 : undefined} aria-label={onSelect ? `Open site ${r.siteName || r.id}` : undefined} onClick={() => { if (!hasActiveTextSelection()) onSelect?.(r); }} onKeyDown={(event) => onSelect && handleRowKeyboard(event, () => onSelect(r))} style={{ cursor: onSelect ? "pointer" : "default" }}>{selectable && <td className="site-select-column" onClick={(event) => event.stopPropagation()}><input type="checkbox" aria-label={`Select ${r.siteName || r.id}`} checked={validSelectedIds.includes(r.id)} onChange={(event) => { setBulkReview(false); setSelectedIds((current) => event.target.checked ? [...current, r.id] : current.filter((id) => id !== r.id)); }} /></td>}<td className="site-identity-column">{r.siteName || <span className="pill issue">Site name required</span>}</td><td className="site-id-column"><strong>{r.id}</strong></td>{detailed && <td className="site-code-column secondary-site-column">{projectSiteCode(r)}</td>}{detailed && <td className="island-column secondary-site-column">{r.islandGroup || "None"}</td>}<td className="site-location-column">{locationLabel(r)}</td><td className="install-date-column">{niceDate(detailed ? r.installDate : r.activationDate)}</td><td className="site-status-column"><StatusPill status={r.status} refs={refs} /></td>{detailed && <td className="updated-by-column secondary-site-column">{r.updatedBy}</td>}{!detailed && <td className="site-contractor-column">{r.contractor}</td>}{(onSelect || (canEdit && onDelete)) && <td className="site-actions-column" onClick={(event) => event.stopPropagation()}><div className="site-row-actions">{onSelect && <button type="button" className="button icon-button ghost" aria-label={`View ${r.siteName || r.id}`} onClick={() => onSelect(r)}><ChevronRight size={16} /></button>}{canEdit && onDelete && <button type="button" className="button icon-button ghost danger" aria-label={`Delete ${r.siteName || r.id}`} disabled={deletingId === r.id} onClick={() => setDeleteCandidate(r)}><Trash2 size={15} /></button>}</div></td>}</tr>)}</tbody></table></div>{detailed && <div className="pagination"><span className="small muted">Showing {firstVisible}-{lastVisible} of {sortedRecords.length} records | {pageSize} rows per page</span><div className="toolbar"><button type="button" className="button icon-button" aria-label="Previous page" disabled={currentPage === 1} onClick={() => setPage((current) => Math.max(1, current - 1))}><ChevronLeft size={16} /></button><span className="pagination-page small">Page {currentPage} of {pageCount}</span><button type="button" className="button icon-button" aria-label="Next page" disabled={currentPage === pageCount} onClick={() => setPage((current) => Math.min(pageCount, current + 1))}><ChevronRight size={16} /></button></div></div>}{deleteCandidate && <div className="modal-backdrop" role="presentation"><div className="modal-panel" role="alertdialog" aria-modal="true" aria-labelledby="delete-site-row-title"><div className="modal-icon danger"><Trash2 size={20} /></div><h2 id="delete-site-row-title">Delete this site?</h2><p className="muted">{deleteCandidate.siteName || deleteCandidate.id} will be removed from the site registry.</p><div className="modal-actions"><button type="button" className="button" disabled={Boolean(deletingId)} onClick={() => setDeleteCandidate(undefined)}>Cancel</button><button type="button" className="button danger-solid" disabled={Boolean(deletingId)} onClick={() => void confirmDelete()}><Trash2 size={15} />{deletingId ? "Deleting..." : "Delete site"}</button></div></div></div>}</>;
+
+  if (!records.length) {
+    return <div className="empty site-list-empty"><ClipboardList size={25} /><p><strong>No sites match these filters.</strong></p>{filterLabels.length > 0 && <span className="empty-filter-summary">{filterLabels.join(" | ")}</span>}<div className="empty-actions">{onClearFilters && <button type="button" className="button" onClick={onClearFilters}><X size={15} />Clear all filters</button>}{canEdit && <span>Add a site if this record has not been encoded yet.</span>}</div></div>;
+  }
+
+  return <>
+    {selectable && selectedRecords.length > 0 && <div className="bulk-action-bar" role="region" aria-label="Bulk site actions"><div className="bulk-action-summary"><strong>{selectedRecords.length} selected</strong>{selectionNote && <span>{selectionNote}</span>}{bulkReview && bulkChangeSummary && <span>Confirm: change {selectedUpdatableRecords.length} {selectedUpdatableRecords.length === 1 ? "site" : "sites"}: {bulkChangeSummary}.</span>}</div><select className="select" aria-label="Bulk update status" value={bulkStatus} onChange={(event) => { setBulkReview(false); setBulkStatus(event.target.value); }}><option value="">Keep status</option>{siteStatusOptions(refs).map((status) => <option value={status.value} key={status.value}>{status.name}</option>)}</select><select className="select" aria-label="Bulk update contractor" value={bulkContractor} onChange={(event) => { setBulkReview(false); setBulkContractor(event.target.value); }}><option value="">Keep contractor</option>{(refs?.contractors ?? []).filter((contractor) => contractor.active || selectedRecords.some((record) => record.contractor === contractor.name)).map((contractor) => <option key={contractor.id}>{contractor.name}</option>)}</select><button type="button" className="button primary" disabled={bulkSaving || !selectedUpdatableRecords.length || (!bulkStatus && !bulkContractor)} onClick={() => void applyBulkUpdate()}>{bulkSaving ? "Updating..." : bulkReview ? "Confirm update" : "Review changes"}</button><button type="button" className="button ghost" disabled={bulkSaving} onClick={() => { setBulkReview(false); setSelectedIds([]); }}>Clear selection</button></div>}
+    <div className={`table-wrap ${detailed ? "sites-table-wrap" : ""}`}>
+      <table className={detailed ? "sites-table" : undefined}>
+        <thead><tr>
+          {selectable && <th className="site-select-column"><input type="checkbox" aria-label="Select visible site rows" checked={visibleSelected} onChange={(event) => toggleVisibleRows(event.target.checked)} /></th>}
+          {sortHeader("Site name", "siteName", "site-identity-column")}
+          {sortHeader("School ID", "id", "site-id-column")}
+          {detailed && sortHeader("Site Code", "siteCode", "site-code-column secondary-site-column")}
+          {detailed && sortHeader("Island group", "islandGroup", "island-column secondary-site-column")}
+          {sortHeader("Location", "location", "site-location-column")}
+          {sortHeader("Created at", "createdAt", "install-date-column")}
+          {sortHeader("Status", "status", "site-status-column")}
+          {detailed && sortHeader("Updated by", "updatedBy", "updated-by-column secondary-site-column")}
+          {!detailed && sortHeader("Contractor", "contractor", "site-contractor-column")}
+          {(onSelect || (canEdit && onDelete)) && <th className="site-actions-column"><span className="sr-only">Actions</span></th>}
+        </tr></thead>
+        <tbody>{visibleRecords.map((r) => <tr key={r.id} role={onSelect ? "button" : undefined} tabIndex={onSelect ? 0 : undefined} aria-label={onSelect ? `Open site ${r.siteName || r.id}` : undefined} onClick={() => { if (!hasActiveTextSelection()) onSelect?.(r); }} onKeyDown={(event) => onSelect && handleRowKeyboard(event, () => onSelect(r))} style={{ cursor: onSelect ? "pointer" : "default" }}>
+          {selectable && <td className="site-select-column" onClick={(event) => event.stopPropagation()}><input type="checkbox" aria-label={`Select ${r.siteName || r.id}`} checked={validSelectedIds.includes(r.id)} onChange={(event) => { setBulkReview(false); setSelectedIds((current) => event.target.checked ? [...current, r.id] : current.filter((id) => id !== r.id)); }} /></td>}
+          <td className="site-identity-column">{r.siteName || <span className="pill issue">Site name required</span>}</td>
+          <td className="site-id-column"><strong>{r.id}</strong></td>
+          {detailed && <td className="site-code-column secondary-site-column">{projectSiteCode(r)}</td>}
+          {detailed && <td className="island-column secondary-site-column">{r.islandGroup || "None"}</td>}
+          <td className="site-location-column">{locationLabel(r)}</td>
+          <td className="install-date-column">{niceDateTime(r.createdAt)}</td>
+          <td className="site-status-column"><StatusPill status={r.status} refs={refs} /></td>
+          {detailed && <td className="updated-by-column secondary-site-column">{r.updatedBy}</td>}
+          {!detailed && <td className="site-contractor-column">{r.contractor}</td>}
+          {(onSelect || (canEdit && onDelete)) && <td className="site-actions-column" onClick={(event) => event.stopPropagation()}><div className="site-row-actions">{onSelect && <button type="button" className="button icon-button ghost" aria-label={`View ${r.siteName || r.id}`} onClick={() => onSelect(r)}><ChevronRight size={16} /></button>}{canEdit && onDelete && <button type="button" className="button icon-button ghost danger" aria-label={`Delete ${r.siteName || r.id}`} disabled={deletingId === r.id} onClick={() => setDeleteCandidate(r)}><Trash2 size={15} /></button>}</div></td>}
+        </tr>)}</tbody>
+      </table>
+    </div>
+    {detailed && <div className="pagination"><span className="small muted">Showing {firstVisible}-{lastVisible} of {sortedRecords.length} records | {pageSize} rows per page</span><div className="toolbar"><button type="button" className="button icon-button" aria-label="Previous page" disabled={currentPage === 1} onClick={() => setPage((current) => Math.max(1, current - 1))}><ChevronLeft size={16} /></button><span className="pagination-page small">Page {currentPage} of {pageCount}</span><button type="button" className="button icon-button" aria-label="Next page" disabled={currentPage === pageCount} onClick={() => setPage((current) => Math.min(pageCount, current + 1))}><ChevronRight size={16} /></button></div></div>}
+    {deleteCandidate && <div className="modal-backdrop" role="presentation"><div className="modal-panel" role="alertdialog" aria-modal="true" aria-labelledby="delete-site-row-title"><div className="modal-icon danger"><Trash2 size={20} /></div><h2 id="delete-site-row-title">Delete this site?</h2><p className="muted">{deleteCandidate.siteName || deleteCandidate.id} will be removed from the site registry.</p><div className="modal-actions"><button type="button" className="button" disabled={Boolean(deletingId)} onClick={() => setDeleteCandidate(undefined)}>Cancel</button><button type="button" className="button danger-solid" disabled={Boolean(deletingId)} onClick={() => void confirmDelete()}><Trash2 size={15} />{deletingId ? "Deleting..." : "Delete site"}</button></div></div></div>}
+  </>;
 }
 
 function ServiceVisitsPage({ records, refs, actorName, onSave, canEdit, routeReady }: { records: Installation[]; refs: ReferenceData; actorName: string; onSave: (installationId: string, visit: ServiceVisit, components: Component[]) => Promise<boolean | undefined>; canEdit: boolean; routeReady: boolean }) {
@@ -1091,6 +1154,7 @@ function InstallationForm({
   const [schoolIdLookupOpen, setSchoolIdLookupOpen] = useState(false);
   const [schoolIdLookupIndex, setSchoolIdLookupIndex] = useState(0);
   const [schoolLookupNotice, setSchoolLookupNotice] = useState("");
+  const [directoryValidationError, setDirectoryValidationError] = useState("");
   const [matchedDirectorySchoolId, setMatchedDirectorySchoolId] = useState("");
   const [matchedDirectorySiteCode, setMatchedDirectorySiteCode] = useState("");
   const [pasteReport, setPasteReport] = useState("");
@@ -1174,6 +1238,7 @@ function InstallationForm({
     if (selected.schoolId) next.id = selected.schoolId;
     setMatchedDirectorySchoolId(selected.schoolId);
     setMatchedDirectorySiteCode(selected.siteCode);
+    setDirectoryValidationError("");
     const resolved = Boolean(selected.regionCode && selected.provinceCode && selected.municipalityCode);
     if (resolved) {
       const locationFields = ["islandGroup", "region", "regionCode", "province", "provinceCode", "municipality", "municipalityCode", "barangay", "barangayCode"] as const;
@@ -1388,6 +1453,7 @@ function InstallationForm({
   const regions = useMemo(() => regionChoices.options.filter((item) => getIslandGroup(item.code) === record.islandGroup), [record.islandGroup, regionChoices.options]);
   const locationError = regionChoices.error || provinceChoices.error || municipalityChoices.error || barangayChoices.error;
   const missingSiteName = !record.siteName.trim();
+  const invalidDirectoryIdentity = Boolean(directoryValidationError);
   const missingLocation = !record.islandGroup || !record.regionCode || !record.provinceCode || !record.municipalityCode;
   const missingLatitude = !record.latitude.trim();
   const missingLongitude = !record.longitude.trim();
@@ -1422,10 +1488,11 @@ function InstallationForm({
   const invalidBeneficiaryPhoneContact = beneficiaryContacts.find((contact) => contact.phone.trim() && !validPhone(contact.phone));
   const beneficiaryNameInvalid = (contact: BeneficiaryContact) => triedSubmit && ((missingBeneficiaryContact && !completeBeneficiaryContact && !contact.name.trim()) || (contactHasValue(contact) && !contact.name.trim()));
   const beneficiaryPhoneInvalid = (contact: BeneficiaryContact) => triedSubmit && ((missingBeneficiaryContact && !completeBeneficiaryContact && !contact.phone.trim()) || (contactHasValue(contact) && !contact.phone.trim()) || (contact.phone.trim() && !validPhone(contact.phone)));
-  const hasValidationError = Boolean(missingSiteName || !schoolId || duplicateSchoolId || duplicate || missingUnitType || missingContractor || missingLocation || missingLatitude || missingLongitude || invalidLatitude || invalidLongitude || missingRequiredCustomField || missingEquipment || invalidMac || invalidInteger || missingComponentValue || (duplicateMac && !duplicateMac.duplicateMacAcknowledged) || missingBeneficiaryContact || incompleteBeneficiaryContact || invalidBeneficiaryPhoneContact);
+  const hasValidationError = Boolean(missingSiteName || !schoolId || invalidDirectoryIdentity || duplicateSchoolId || duplicate || missingUnitType || missingContractor || missingLocation || missingLatitude || missingLongitude || invalidLatitude || invalidLongitude || missingRequiredCustomField || missingEquipment || invalidMac || invalidInteger || missingComponentValue || (duplicateMac && !duplicateMac.duplicateMacAcknowledged) || missingBeneficiaryContact || incompleteBeneficiaryContact || invalidBeneficiaryPhoneContact);
   const validationItems = [
     missingSiteName && { id: "site-name-error", target: "site-name-input", text: "Enter a site name." },
     !schoolId && { id: "school-id-required-error", target: "school-id-input", text: "Enter the official School ID." },
+    invalidDirectoryIdentity && { id: "school-directory-match-error", target: "school-id-input", text: "Choose a site from the current school directory." },
     duplicateSchoolId && { id: "school-id-duplicate-error", target: "school-id-input", text: "Use a unique School ID." },
     duplicate && { id: "site-name-duplicate-error", target: "site-name-input", text: "Use a unique site name." },
     missingUnitType && { id: "solution-required-error", target: "solution-input", text: "Choose a solution." },
@@ -1445,13 +1512,13 @@ function InstallationForm({
     incompleteBeneficiaryContact && { id: "beneficiary-required-error", target: !incompleteBeneficiaryContact.name.trim() ? `beneficiary-${incompleteBeneficiaryContact.id}-name` : `beneficiary-${incompleteBeneficiaryContact.id}-phone`, text: "Complete beneficiary contact name and phone." },
     invalidBeneficiaryPhoneContact && { id: "beneficiary-phone-error", target: `beneficiary-${invalidBeneficiaryPhoneContact.id}-phone`, text: "Check the beneficiary phone number." },
   ].filter(Boolean) as { id: string; target: string; text: string }[];
-  const siteNameDescriptions = [duplicate ? "site-name-duplicate-error" : "", triedSubmit && missingSiteName ? "site-name-error" : ""].filter(Boolean).join(" ") || undefined;
-  const schoolIdDescriptions = [duplicateSchoolId ? "school-id-duplicate-error" : "", triedSubmit && !schoolId ? "school-id-required-error" : ""].filter(Boolean).join(" ") || undefined;
+  const siteNameDescriptions = [duplicate ? "site-name-duplicate-error" : "", invalidDirectoryIdentity ? "school-directory-match-error" : "", triedSubmit && missingSiteName ? "site-name-error" : ""].filter(Boolean).join(" ") || undefined;
+  const schoolIdDescriptions = [duplicateSchoolId ? "school-id-duplicate-error" : "", invalidDirectoryIdentity ? "school-directory-match-error" : "", triedSubmit && !schoolId ? "school-id-required-error" : ""].filter(Boolean).join(" ") || undefined;
   const locationDescription = triedSubmit && missingLocation ? "location-required-error" : undefined;
   const latitudeDescription = [triedSubmit && missingLatitude ? "latitude-required-error" : "", triedSubmit && invalidLatitude ? "latitude-invalid-error" : ""].filter(Boolean).join(" ") || undefined;
   const longitudeDescription = [triedSubmit && missingLongitude ? "longitude-required-error" : "", triedSubmit && invalidLongitude ? "longitude-invalid-error" : ""].filter(Boolean).join(" ") || undefined;
   const requiredProgress = [
-    { label: "Site details", sectionId: "site-details-section", complete: Boolean(record.siteName && schoolId && record.unitType && record.contractor && !duplicate && !duplicateSchoolId) },
+    { label: "Site details", sectionId: "site-details-section", complete: Boolean(record.siteName && schoolId && !invalidDirectoryIdentity && record.unitType && record.contractor && !duplicate && !duplicateSchoolId) },
     { label: "Location", sectionId: "site-location-section", complete: !missingLocation && !missingLatitude && !missingLongitude && !invalidLatitude && !invalidLongitude && !locationError },
     ...(requiredCustomFields.length ? [{ label: "Required extras", sectionId: "required-additional-section", complete: requiredCustomComplete }] : []),
     { label: "Equipment", sectionId: "equipment-section", complete: !missingEquipment && !missingComponentValue && !invalidMac && !invalidInteger && !(duplicateMac && !duplicateMac.duplicateMacAcknowledged) },
@@ -1505,6 +1572,36 @@ function InstallationForm({
     });
   }
   function savedRecord() { return syncedBeneficiaryFields({ ...record, components: record.components.map((component) => ({ ...component, values: Object.fromEntries(Object.entries(component.values ?? {}).map(([id, value]) => { const attachment = visibleComponentFields(refs, component).find((field) => field.id === id); return [id, attachment && libraryField(refs, attachment)?.type === "mac" && value ? normalizeMac(value) : value]; })) })), updatedBy: actorName, updatedAt: new Date().toISOString() }); }
+  async function validateDirectoryBeforeSave() {
+    const currentSchoolId = record.id.trim();
+    const currentSiteName = record.siteName.trim();
+    if (!currentSchoolId || !currentSiteName) return false;
+    try {
+      const match = await findSchoolDirectoryEntry({ schoolId: currentSchoolId });
+      if (!match || normalizeDirectoryText(match.schoolId) !== normalizeDirectoryText(currentSchoolId)) {
+        setMatchedDirectorySchoolId("");
+        setMatchedDirectorySiteCode("");
+        setDirectoryValidationError("Choose a School ID from the current school directory before saving.");
+        showValidationErrors();
+        return false;
+      }
+      if (normalizeDirectoryText(match.schoolName) !== normalizeDirectoryText(currentSiteName)) {
+        setMatchedDirectorySchoolId("");
+        setMatchedDirectorySiteCode("");
+        setDirectoryValidationError(`School ID ${match.schoolId} belongs to ${match.schoolName}. Select the directory result so the site name and School ID match.`);
+        showValidationErrors();
+        return false;
+      }
+      setMatchedDirectorySchoolId(match.schoolId);
+      setMatchedDirectorySiteCode(match.siteCode);
+      setDirectoryValidationError("");
+      return true;
+    } catch {
+      setDirectoryValidationError("The school directory could not be checked. Retry before saving this site.");
+      showValidationErrors();
+      return false;
+    }
+  }
   async function persistRecord() {
     setSaving(true);
     const next = savedRecord();
@@ -1516,7 +1613,13 @@ function InstallationForm({
       setSaving(false);
     }
   }
-  async function submit(e: FormEvent) { e.preventDefault(); if (saving || !isDirty) return; if (hasValidationError) { showValidationErrors(); return; } await persistRecord(); }
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (saving || !isDirty) return;
+    if (hasValidationError) { showValidationErrors(); return; }
+    if (!await validateDirectoryBeforeSave()) return;
+    await persistRecord();
+  }
   function addComponent() { patch({ components: [...record.components, componentDraft(refs.componentTypes.find((x) => x.active)?.name ?? "", record.components.length)] }); }
   function componentPatch(id: string, data: Partial<Component>) { patch({ components: record.components.map((c) => c.id === id ? { ...c, ...data } : c) }); }
   function deleteComponent(id: string) { patch({ components: record.components.filter((component) => component.id !== id) }); setDeleteComponentId(undefined); }
@@ -1627,6 +1730,7 @@ function InstallationForm({
   async function handleSaveAndExit() {
     if (saving) return;
     if (hasValidationError) { setShowExitModal(false); showValidationErrors(); return; }
+    if (!await validateDirectoryBeforeSave()) { setShowExitModal(false); return; }
     setShowExitModal(false);
     await persistRecord();
   }
@@ -1681,8 +1785,8 @@ function InstallationForm({
       </section>}
       {initial && <section className="section ownership-grid" aria-label="Saved record metadata"><div><span className="small muted">Created by</span><strong>{record.createdBy}</strong></div><div><span className="small muted">Created</span><strong>{niceDateTime(record.createdAt)}</strong></div><div><span className="small muted">Updated by</span><strong>{record.updatedBy}</strong></div><div><span className="small muted">Last saved</span><strong>{niceDateTime(record.updatedAt)}</strong></div></section>}
       <section id="site-details-section" className="section site-details-polish site-details-guided"><div className="section-title"><div><h2>Site details</h2><span className="small muted">Identity, ownership, and current installation state</span></div><div className="toolbar section-copy-actions" aria-label="Copy site details"><button type="button" className={`button ${projectCopied ? "copied" : ""}`} disabled={saving || deleting || !record.id.trim() || !record.siteName.trim()} onClick={() => void copyProjectName()} title="Copy ELRN project name">{projectCopied ? <CheckCircle2 size={15} /> : <ClipboardCopy size={15} />}{projectCopyLabel}</button><button type="button" className={`button ${excelSiteCopied ? "copied" : ""}`} disabled={saving || deleting} onClick={() => void copyForExcel("first")} title="Copy BEIS School ID, Site Name, and Site Complete Address">{excelSiteCopied ? <CheckCircle2 size={15} /> : <ClipboardCopy size={15} />}{excelSiteCopyLabel}</button><button type="button" className={`button ${excelActivationCopied ? "copied" : ""}`} disabled={saving || deleting} onClick={() => void copyForExcel("last")} title="Copy activation columns">{excelActivationCopied ? <CheckCircle2 size={15} /> : <ClipboardCopy size={15} />}{excelActivationCopyLabel}</button></div></div><div className="grid-3">
-        <label className="school-lookup">Site name<input id="site-name-input" required className={`field${extractionHighlight("siteName")}`} role="combobox" aria-autocomplete="list" aria-expanded={schoolLookupOpen && schoolMatches.length > 0} aria-controls="school-directory-results" aria-invalid={Boolean((triedSubmit && missingSiteName) || duplicate) || undefined} aria-describedby={siteNameDescriptions} value={record.siteName} onFocus={() => setSchoolLookupOpen(true)} onBlur={() => window.setTimeout(() => setSchoolLookupOpen(false), 120)} onKeyDown={schoolLookupKeyDown} onChange={(e) => { patch({ siteName: e.target.value }); setSchoolLookupOpen(true); setSchoolLookupNotice(""); setMatchedDirectorySchoolId(""); setMatchedDirectorySiteCode(""); }} placeholder="Search or enter a school name" />{schoolLookupOpen && record.siteName.trim().length >= 2 && schoolMatches.length > 0 && <div className="school-lookup-results" id="school-directory-results" role="listbox">{schoolMatches.map((entry, index) => <button type="button" className={`school-lookup-option ${index === schoolLookupIndex ? "active" : ""}`} role="option" aria-selected={index === schoolLookupIndex} key={entry.id} onMouseDown={(event) => event.preventDefault()} onClick={() => selectDirectorySchool(entry)}><span className="school-lookup-name">{entry.schoolName}</span><span className="school-lookup-province">{entry.province || "Province unavailable"}</span></button>)}</div>}</label>
-        <label className="school-lookup">School ID<span className="verified-field-wrap"><input id="school-id-input" required className={`field${extractionHighlight("id")}`} role="combobox" aria-autocomplete="list" aria-expanded={schoolIdLookupOpen && schoolIdMatches.length > 0} aria-controls="school-id-directory-results" aria-invalid={Boolean((triedSubmit && !schoolId) || duplicateSchoolId) || undefined} aria-describedby={schoolIdDescriptions} value={record.id} onFocus={() => setSchoolIdLookupOpen(true)} onBlur={() => window.setTimeout(() => setSchoolIdLookupOpen(false), 120)} onKeyDown={schoolIdLookupKeyDown} onChange={(e) => { patch({ id: e.target.value }); setSchoolIdLookupOpen(true); setSchoolLookupNotice(""); setMatchedDirectorySchoolId(""); setMatchedDirectorySiteCode(""); }} placeholder="Search or enter School ID" />{matchedDirectorySchoolId === record.id.trim() && <CheckCircle2 className="field-check-icon" size={16} aria-label="School ID found in directory" />}</span>{schoolIdLookupOpen && record.id.trim().length >= 2 && schoolIdMatches.length > 0 && <div className="school-lookup-results" id="school-id-directory-results" role="listbox">{schoolIdMatches.map((entry, index) => <button type="button" className={`school-lookup-option ${index === schoolIdLookupIndex ? "active" : ""}`} role="option" aria-selected={index === schoolIdLookupIndex} key={entry.id} onMouseDown={(event) => event.preventDefault()} onClick={() => selectDirectorySchool(entry)}><span className="school-lookup-name">{entry.schoolId || "No School ID"}</span><span className="school-lookup-province">{entry.schoolName}</span></button>)}</div>}</label>
+        <label className="school-lookup">Site name<input id="site-name-input" required className={`field${extractionHighlight("siteName")}`} role="combobox" aria-autocomplete="list" aria-expanded={schoolLookupOpen && schoolMatches.length > 0} aria-controls="school-directory-results" aria-invalid={Boolean((triedSubmit && missingSiteName) || duplicate || invalidDirectoryIdentity) || undefined} aria-describedby={siteNameDescriptions} value={record.siteName} onFocus={() => setSchoolLookupOpen(true)} onBlur={() => window.setTimeout(() => setSchoolLookupOpen(false), 120)} onKeyDown={schoolLookupKeyDown} onChange={(e) => { patch({ siteName: e.target.value }); setSchoolLookupOpen(true); setSchoolLookupNotice(""); setDirectoryValidationError(""); setMatchedDirectorySchoolId(""); setMatchedDirectorySiteCode(""); }} placeholder="Search or enter a school name" />{schoolLookupOpen && record.siteName.trim().length >= 2 && schoolMatches.length > 0 && <div className="school-lookup-results" id="school-directory-results" role="listbox">{schoolMatches.map((entry, index) => <button type="button" className={`school-lookup-option ${index === schoolLookupIndex ? "active" : ""}`} role="option" aria-selected={index === schoolLookupIndex} key={entry.id} onMouseDown={(event) => event.preventDefault()} onClick={() => selectDirectorySchool(entry)}><span className="school-lookup-name">{entry.schoolName}</span><span className="school-lookup-province">{entry.province || "Province unavailable"}</span></button>)}</div>}</label>
+        <label className="school-lookup">School ID<span className="verified-field-wrap"><input id="school-id-input" required className={`field${extractionHighlight("id")}`} role="combobox" aria-autocomplete="list" aria-expanded={schoolIdLookupOpen && schoolIdMatches.length > 0} aria-controls="school-id-directory-results" aria-invalid={Boolean((triedSubmit && !schoolId) || duplicateSchoolId || invalidDirectoryIdentity) || undefined} aria-describedby={schoolIdDescriptions} value={record.id} onFocus={() => setSchoolIdLookupOpen(true)} onBlur={() => window.setTimeout(() => setSchoolIdLookupOpen(false), 120)} onKeyDown={schoolIdLookupKeyDown} onChange={(e) => { patch({ id: e.target.value }); setSchoolIdLookupOpen(true); setSchoolLookupNotice(""); setDirectoryValidationError(""); setMatchedDirectorySchoolId(""); setMatchedDirectorySiteCode(""); }} placeholder="Search or enter School ID" />{matchedDirectorySchoolId === record.id.trim() && <CheckCircle2 className="field-check-icon" size={16} aria-label="School ID found in directory" />}</span>{schoolIdLookupOpen && record.id.trim().length >= 2 && schoolIdMatches.length > 0 && <div className="school-lookup-results" id="school-id-directory-results" role="listbox">{schoolIdMatches.map((entry, index) => <button type="button" className={`school-lookup-option ${index === schoolIdLookupIndex ? "active" : ""}`} role="option" aria-selected={index === schoolIdLookupIndex} key={entry.id} onMouseDown={(event) => event.preventDefault()} onClick={() => selectDirectorySchool(entry)}><span className="school-lookup-name">{entry.schoolId || "No School ID"}</span><span className="school-lookup-province">{entry.schoolName}</span></button>)}</div>}</label>
         <label>Site Code<input id="site-code-input" className="field" value={currentSiteCode} placeholder="Autofills from School ID" readOnly /></label>
         <label>Solution<select id="solution-input" className={`select${extractionHighlight("unitType")}`} aria-invalid={Boolean(triedSubmit && missingUnitType) || undefined} aria-describedby={triedSubmit && missingUnitType ? "solution-required-error" : undefined} value={record.unitType} onChange={(e) => patch({ unitType: e.target.value })}>{activeOptions(refs.unitTypes, record.unitType).map((x) => <option key={x.id}>{x.name}</option>)}</select></label>
         <div><label>Contractor<select id="contractor-input" className={`select${extractionHighlight("contractor")}`} aria-invalid={Boolean(triedSubmit && missingContractor) || undefined} aria-describedby={triedSubmit && missingContractor ? "contractor-required-error" : undefined} value={record.contractor} onChange={(e) => { if (e.target.value === addContractorOption) { setAddingContractor(true); setContractorError(""); return; } patch({ contractor: e.target.value }); }}>{activeOptions(refs.contractors, record.contractor).map((x) => <option key={x.id}>{x.name}</option>)}<option value={addContractorOption}>+ Add contractor</option></select></label>{addingContractor && <div style={{ display: "grid", gap: 8, marginTop: 8 }}><input className="field" value={newContractorName} onChange={(e) => setNewContractorName(e.target.value)} placeholder="New contractor name" disabled={contractorSaving} /><div className="toolbar"><button type="button" className="button" disabled={contractorSaving} onClick={() => { setAddingContractor(false); setNewContractorName(""); setContractorError(""); }}>Cancel</button><button type="button" className="button primary" disabled={contractorSaving || !newContractorName.trim()} onClick={() => void submitNewContractor()}>{contractorSaving ? "Adding..." : "Add and select"}</button></div>{contractorError && <div className="small validation-copy">{contractorError}</div>}</div>}</div>
@@ -1690,7 +1794,7 @@ function InstallationForm({
         <label>Activation date<input id="activation-date-input" className={`field${extractionHighlight("activationDate")}`} type="date" value={record.activationDate ?? ""} placeholder={today()} onChange={(e) => patch({ activationDate: e.target.value || undefined })} /></label>
         <label>Config date<input id="install-date-input" className={`field${extractionHighlight("installDate")}`} type="date" value={record.installDate} onChange={(e) => patch({ installDate: e.target.value })} /></label>
         <label>Status<span className="status-select-wrap"><span className="status-dot status-select-dot" aria-hidden="true" style={{ background: siteStatusColor(record.status, refs) }} /><select className="select status-select" value={record.status} onChange={(e) => patch({ status: e.target.value as Status })}>{siteStatusOptions(refs, record.status).map((status) => <option value={status.value} key={status.value}>{status.name}</option>)}</select></span></label>
-      </div>{schoolLookupNotice && <div className="small muted school-lookup-notice" role="status">{schoolLookupNotice}</div>}{triedSubmit && missingSiteName && <div id="site-name-error" className="notice validation-notice inline" role="alert"><strong>Site name is required.</strong> Enter or choose the school name before saving.</div>}{triedSubmit && !schoolId && <div id="school-id-required-error" className="notice validation-notice inline" role="alert"><strong>School ID is required.</strong> Enter the official school identifier before saving.</div>}{duplicateSchoolId && <div id="school-id-duplicate-error" className="notice validation-notice inline" role="alert"><strong>This School ID already exists.</strong> Enter a unique School ID before saving.</div>}{duplicate && <div id="site-name-duplicate-error" className="notice validation-notice inline" role="alert"><strong>This site name already exists.</strong> Enter a unique site name before saving.</div>}{triedSubmit && missingUnitType && <div id="solution-required-error" className="notice validation-notice inline" role="alert"><strong>Solution is required.</strong> Choose the installation solution before saving.</div>}{triedSubmit && missingContractor && <div id="contractor-required-error" className="notice validation-notice inline" role="alert"><strong>Contractor is required.</strong> Choose or add the contractor before saving.</div>}{record.legacyKitNumber && <div className="notice inline legacy-kit-prompt"><span className="small migration-label">Migration follow-up</span><strong>Assign old kit number: {record.legacyKitNumber}</strong><div className="small">Add the correct equipment, enter this value in its kit-number field, then mark this follow-up as assigned.</div><button type="button" className="button" onClick={() => patch({ legacyKitNumber: undefined })}>Mark kit number assigned</button></div>}</section>
+      </div>{schoolLookupNotice && <div className="small muted school-lookup-notice" role="status">{schoolLookupNotice}</div>}{triedSubmit && missingSiteName && <div id="site-name-error" className="notice validation-notice inline" role="alert"><strong>Site name is required.</strong> Enter or choose the school name before saving.</div>}{triedSubmit && !schoolId && <div id="school-id-required-error" className="notice validation-notice inline" role="alert"><strong>School ID is required.</strong> Enter the official school identifier before saving.</div>}{directoryValidationError && <div id="school-directory-match-error" className="notice validation-notice inline" role="alert"><strong>Use the current school directory.</strong> {directoryValidationError}</div>}{duplicateSchoolId && <div id="school-id-duplicate-error" className="notice validation-notice inline" role="alert"><strong>This School ID already exists.</strong> Enter a unique School ID before saving.</div>}{duplicate && <div id="site-name-duplicate-error" className="notice validation-notice inline" role="alert"><strong>This site name already exists.</strong> Enter a unique site name before saving.</div>}{triedSubmit && missingUnitType && <div id="solution-required-error" className="notice validation-notice inline" role="alert"><strong>Solution is required.</strong> Choose the installation solution before saving.</div>}{triedSubmit && missingContractor && <div id="contractor-required-error" className="notice validation-notice inline" role="alert"><strong>Contractor is required.</strong> Choose or add the contractor before saving.</div>}{record.legacyKitNumber && <div className="notice inline legacy-kit-prompt"><span className="small migration-label">Migration follow-up</span><strong>Assign old kit number: {record.legacyKitNumber}</strong><div className="small">Add the correct equipment, enter this value in its kit-number field, then mark this follow-up as assigned.</div><button type="button" className="button" onClick={() => patch({ legacyKitNumber: undefined })}>Mark kit number assigned</button></div>}</section>
       <section id="site-location-section" className="section"><div className="section-title"><div><h2>Site location</h2><span className="small muted">PSGC-aligned fields use the selected school directory match</span></div><div className="toolbar section-copy-actions" aria-label="Copy coordinates"><button type="button" className={`button ${coordinateCopied ? "copied" : ""}`} disabled={saving || deleting || (!record.latitude.trim() && !record.longitude.trim())} onClick={() => void copyLatLong()} title="Copy latitude and longitude">{coordinateCopied ? <CheckCircle2 size={15} /> : <ClipboardCopy size={15} />}{coordinateCopyLabel}</button><button type="button" className={`button ${plusCodeCopied ? "copied" : ""}`} disabled={saving || deleting || !record.latitude.trim() || !record.longitude.trim()} onClick={() => void copyPlusCode()} title="Copy Google Maps Plus Code from latitude and longitude">{plusCodeCopied ? <CheckCircle2 size={15} /> : <ClipboardCopy size={15} />}{plusCodeCopyLabel}</button></div></div><div className="site-field-container"><div className="grid-4">
         <LocationCombobox inputId="island-group-input" label="Island group" placeholder="Search island group" value={record.islandGroup} options={islandGroups.map((group) => ({ code: group, name: group }))} invalid={triedSubmit && !record.islandGroup} describedBy={locationDescription} highlight={extractionHighlights.includes("islandGroup")} onSelect={(selected) => patch({ islandGroup: selected.code as Installation["islandGroup"], region: "", regionCode: "", province: "", provinceCode: "", municipality: "", municipalityCode: "", barangay: "", barangayCode: "" })} />
         <LocationCombobox inputId="region-input" label="Region" placeholder="Search region" value={record.regionCode} options={regions} loading={regionChoices.loading} disabled={!record.islandGroup} invalid={triedSubmit && !record.regionCode} describedBy={locationDescription} highlight={extractionHighlights.includes("regionCode")} onSelect={(selected) => patch({ region: selected.name, regionCode: selected.code, province: "", provinceCode: "", municipality: "", municipalityCode: "", barangay: "", barangayCode: "" })} />
