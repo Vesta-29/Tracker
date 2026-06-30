@@ -249,6 +249,9 @@ h3 { font-size: 14px; margin: 0; }
 .status-filter-pill.active { border-color: oklch(0.72 0.07 164); color: var(--accent); background: var(--accent-soft); }
 .field, .select, .textarea { width: 100%; border: 1px solid var(--line); border-radius: 8px; background: oklch(0.995 0.003 155); color: var(--ink); padding: 9px 10px; transition: border-color 160ms var(--ease-out), background-color 160ms var(--ease-out), box-shadow 160ms var(--ease-out), opacity 160ms var(--ease-out); }
 .field.extraction-filled, .select.extraction-filled, .textarea.extraction-filled { border-color: oklch(0.79 0.12 112); background: oklch(0.96 0.06 112); box-shadow: 0 0 0 3px oklch(0.86 0.09 112 / .32); }
+.contractor-add-panel { display: grid; gap: 8px; margin-top: 8px; }
+.contractor-add-panel.needs-review { padding: 9px; border: 1px solid oklch(0.84 0.075 70); border-radius: 8px; background: oklch(0.985 0.022 76); }
+.contractor-review-note { color: oklch(0.42 0.095 62); font-weight: 700; }
 .field:hover:not(:disabled), .select:hover:not(:disabled), .textarea:hover:not(:disabled) { border-color: oklch(0.78 0.035 155); }
 .field:user-invalid, .select:user-invalid, .textarea:user-invalid { border-color: oklch(0.66 0.14 42); box-shadow: 0 0 0 3px oklch(0.9 0.045 52 / .55); }
 .field:disabled, .select:disabled, .textarea:disabled { cursor: not-allowed; color: var(--ink-muted); background: var(--surface-muted); opacity: .72; }
@@ -556,7 +559,9 @@ tbody tr:last-child td { border-bottom: 0; }
 .notice.inline { margin-top: 12px; }
 .notice + .notice { margin-top: var(--space-2); }
 .validation-notice { border-color: oklch(0.82 0.09 52); background: oklch(0.97 0.035 60); }
-.validation-summary ul { display: grid; gap: 4px; margin: 8px 0 0; padding-left: 18px; }
+.validation-summary { display: grid; width: 100%; max-width: 760px; gap: 8px; overflow-wrap: anywhere; }
+.validation-summary ul { display: grid; gap: 5px; margin: 0; padding-left: 18px; }
+.validation-summary li { padding-left: 1px; }
 .validation-summary a { color: inherit; font-weight: 700; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
 .field[aria-invalid="true"], .select[aria-invalid="true"], .textarea[aria-invalid="true"] { border-color: oklch(0.68 0.16 35); background: oklch(0.985 0.016 48); box-shadow: 0 0 0 3px oklch(0.82 0.09 52 / .18); }
 .attention-list { display: grid; gap: 8px; margin-top: 18px; }
