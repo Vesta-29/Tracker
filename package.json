@@ -10,6 +10,7 @@
     "test": "vitest run",
     "seed:psgc": "node --env-file-if-exists=.env.local scripts/seed-psgc.mjs",
     "seed:references": "node --env-file-if-exists=.env.local scripts/seed-references.mjs",
+    "replace:contractors": "node --env-file-if-exists=.env.local scripts/replace-contractors.mjs",
     "bootstrap:admin": "node --env-file-if-exists=.env.local scripts/bootstrap-admin.mjs",
     "check:psgc": "node scripts/check-psgc.mjs"
   },

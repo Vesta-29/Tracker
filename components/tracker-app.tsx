@@ -278,6 +278,49 @@ function useModalAccessibility() {
 function activeOptions(options: ReferenceOption[], selected?: string) { return options.filter((option) => option.active || option.name === selected); }
 function normalizeMac(value: string) { const compact = value.replace(/[:-]/g, "").trim().toUpperCase(); return /^[0-9A-F]{12}$/.test(compact) ? compact.match(/.{2}/g)!.join(":") : ""; }
 function normalizeDirectoryText(value: string) { return value.trim().replace(/\s+/g, " ").toLowerCase(); }
+function normalizeContractorText(value: string) {
+  return value.toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+}
+function contractorTokens(value: string) {
+  const noise = new Set(["co", "company", "corp", "corporation", "inc", "incorporated", "service", "services", "solution", "solutions", "system", "systems"]);
+  return normalizeContractorText(value).split(" ").filter((token) => token && !noise.has(token));
+}
+function editDistance(a: string, b: string) {
+  const previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i += 1) {
+    let diagonal = previous[0];
+    previous[0] = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const above = previous[j];
+      previous[j] = a[i - 1] === b[j - 1] ? diagonal : Math.min(previous[j] + 1, previous[j - 1] + 1, diagonal + 1);
+      diagonal = above;
+    }
+  }
+  return previous[b.length];
+}
+function contractorMatchScore(raw: string, candidate: string) {
+  const rawFull = normalizeContractorText(raw);
+  const candidateFull = normalizeContractorText(candidate);
+  if (!rawFull || !candidateFull) return 0;
+  if (rawFull === candidateFull) return 1;
+  const rawCore = contractorTokens(raw).join(" ");
+  const candidateCore = contractorTokens(candidate).join(" ");
+  if (rawCore && candidateCore && rawCore === candidateCore) return .98;
+  if ((rawCore.length >= 4 && candidateCore.includes(rawCore)) || (candidateCore.length >= 4 && rawCore.includes(candidateCore))) return .92;
+  const rawTokens = new Set(contractorTokens(raw));
+  const candidateTokens = new Set(contractorTokens(candidate));
+  const intersection = [...rawTokens].filter((token) => candidateTokens.has(token)).length;
+  const union = new Set([...rawTokens, ...candidateTokens]).size || 1;
+  const tokenScore = intersection / union;
+  const distanceBase = Math.max(rawCore.length || rawFull.length, candidateCore.length || candidateFull.length, 1);
+  const distanceScore = 1 - editDistance(rawCore || rawFull, candidateCore || candidateFull) / distanceBase;
+  return Math.max(tokenScore, distanceScore);
+}
+function closestContractor(raw: string, options: ReferenceOption[]) {
+  const ranked = options.filter((option) => option.active).map((option) => ({ option, score: contractorMatchScore(raw, option.name) })).sort((a, b) => b.score - a.score);
+  const best = ranked[0];
+  return best && best.score >= .72 ? best.option : undefined;
+}
 function validInteger(value: string) { return /^-?\d+$/.test(value.trim()); }
 function validCoordinate(value: string, min: number, max: number) { const trimmed = value.trim(); if (!trimmed || !/^-?\d+(\.\d+)?$/.test(trimmed)) return false; const parsed = Number(trimmed); return Number.isFinite(parsed) && parsed >= min && parsed <= max; }
 function validPhone(value: string) { const trimmed = value.trim(); const digits = trimmed.replace(/\D/g, ""); return digits.length >= 7 && digits.length <= 15 && /^[+()\d\s.-]+$/.test(trimmed); }
@@ -782,7 +825,7 @@ function FilterBar({ records, refs, filters, setFilters, compact = false, matchi
   </>;
   const advancedFilters = <div className="advanced-filter-grid">
     {savedViews.length > 0 && <div className="saved-view-control"><select className="select saved-view-select" aria-label="Apply saved site filter" value={selectedSavedViewId} onChange={(event) => applySavedView(event.target.value)}><option value="">Saved views</option>{savedViews.map((view) => <option value={view.id} key={view.id}>{view.name}</option>)}</select><button type="button" className="button icon-button ghost saved-view-delete" disabled={!selectedSavedViewId} aria-label="Delete selected saved view" title="Delete selected saved view" onClick={deleteSelectedSavedView}><Trash2 size={15} /></button></div>}
-    <select className="select" aria-label="Filter sites by contractor" value={filters.contractor} onChange={(e) => setFilters({ ...filters, contractor: e.target.value })}><option value="">All contractors</option>{refs.contractors.map((c) => <option key={c.id}>{c.name}</option>)}</select>
+    <select className="select" aria-label="Filter sites by contractor" value={filters.contractor} onChange={(e) => setFilters({ ...filters, contractor: e.target.value })}><option value="">All contractors</option>{activeOptions(refs.contractors, filters.contractor).map((c) => <option key={c.id}>{c.name}</option>)}</select>
     {!promoteUpdatedDate && <select className="select updated-by-filter" aria-label="Filter sites by updated by" value={filters.updatedBy} onChange={(e) => setFilters({ ...filters, updatedBy: e.target.value })}><option value="">Updated by</option>{updatedByOptions.map((name) => <option key={name}>{name}</option>)}</select>}
     {!promoteUpdatedDate && <DateRangeFilter from={filters.from} to={filters.to} minDate={minDate} maxDate={maxDate} onChange={(range) => setFilters({ ...filters, ...range })} ariaLabel="Filter sites by activation date" />}
     {locationFilters}
@@ -1041,7 +1084,7 @@ function ServiceVisitsPage({ records, refs, actorName, onSave, canEdit, routeRea
     <div className="stats">{counts.map(({ status, count }) => <button type="button" className={`stat stat-button ${filters.status === status ? "active" : ""}`} aria-pressed={filters.status === status} key={status} onClick={() => setFilters({ ...filters, status: filters.status === status ? "" : status })}><span className="small muted">{serviceStatusLabels[status]}</span><span className="stat-value">{count}<span className="status-dot" aria-hidden="true" style={{ background: status === "completed" ? siteStatusColor("installed") : status === "cancelled" ? siteStatusColor("cancelled") : status === "in_progress" ? siteStatusColor("issue") : siteStatusColor("scheduled") }} /></span></button>)}</div>
     <div className="panel"><div className="section filter-stack"><div className="toolbar filter-row">
       <div className="input-wrap"><Search className="input-icon" size={17} /><input className="field search" aria-label="Search service visits" placeholder="Search site or ticket" value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} /></div>
-      <select className="select" aria-label="Filter service visits by contractor" value={filters.contractor} onChange={(e) => setFilters({ ...filters, contractor: e.target.value })}><option value="">All contractors</option>{refs.contractors.map((contractor) => <option key={contractor.id}>{contractor.name}</option>)}</select>
+      <select className="select" aria-label="Filter service visits by contractor" value={filters.contractor} onChange={(e) => setFilters({ ...filters, contractor: e.target.value })}><option value="">All contractors</option>{activeOptions(refs.contractors, filters.contractor).map((contractor) => <option key={contractor.id}>{contractor.name}</option>)}</select>
       <button type="button" className={`button advanced-filter-trigger ${advanced || filters.type ? "active" : ""}`} aria-expanded={advanced} onClick={() => setAdvanced((open) => !open)}>Advanced filters{filters.type && <span>1</span>}<ChevronDown size={14} /></button>
       {active && <button type="button" className="button ghost" onClick={clearFilters}><X size={16} />Clear</button>}
     </div>
@@ -1323,7 +1366,7 @@ function InstallationForm({
       }
     } else if (values.schoolId || values.siteName) warnings.push("No unique school-directory match was found.");
 
-    const contractor = refs.contractors.find((item) => item.active && item.name.localeCompare(values.contractor, undefined, { sensitivity: "accent" }) === 0);
+    const contractor = closestContractor(values.contractor, refs.contractors);
     if (values.contractor && !contractor) {
       setNewContractorName(values.contractor);
       setAddingContractor(true);

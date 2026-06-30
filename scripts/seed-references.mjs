@@ -7,7 +7,19 @@ const siteStatuses = [
   ["issue", "Issue"],
   ["cancelled", "Cancelled"],
 ].map(([value, name], display_order) => ({ value, name, active: true, display_order }));
-const contractors = ["Lighthouse Network Services", "Northline Systems", "Pacific Link Solutions", "SignalWorks PH"].map((name, display_order) => ({ name, active: true, display_order }));
+const contractors = [
+  "SES88 IT Solutions",
+  "Telkha Network Inc.",
+  "AMERS Network",
+  "Expedire Services Inc",
+  "Radiance",
+  "BICAMO Systems Solutions",
+  "1088 Octagram",
+  "Transcends",
+  "JBLO Telecom Corp.",
+  "CHRIS CCTV INSTALLATION",
+  "Golden Victory",
+].map((name, display_order) => ({ name, active: true, display_order }));
 const unitTypes = ["Satellite broadband", "Fixed wireless", "Fiber internet"].map((name, display_order) => ({ name, active: true, display_order }));
 const defaultComponentTypes = new Set(["Dish antenna", "Modem", "Router"]);
 const componentTypes = ["Dish antenna", "Modem", "Router", "Power supply", "Outdoor radio", "Starlink Performance Kit"].map((name, display_order) => ({ name, active: true, display_order, default_on_new_site: defaultComponentTypes.has(name) }));
