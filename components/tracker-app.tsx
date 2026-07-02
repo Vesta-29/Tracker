@@ -2494,7 +2494,9 @@ function equipmentFieldValue(component: Component | undefined, refs: ReferenceDa
 
 function installationExcelClipboardRow(record: Installation, refs: ReferenceData, part: "first" | "last") {
   const cleanCell = (value: unknown) => String(value ?? "").replace(/[\t\r\n]+/g, " ").trim();
-  const starlink = record.components.find((component) => !component.removedAt && exportMatchKey(component.type).includes("starlink"));
+  const activeComponents = record.components.filter((component) => !component.removedAt);
+  const starlink = activeComponents.find((component) => exportMatchKey(component.type).includes("starlink"));
+  const ruijieRouter = findRouterComponent(activeComponents);
   const completeAddress = record.contractorAddress.trim() || [record.barangay, record.municipality, record.province].map((part) => part.trim()).filter(Boolean).join(", ");
   const contact = beneficiaryContactList(record).find(contactHasValue);
   const firstHalf = [
@@ -2507,6 +2509,7 @@ function installationExcelClipboardRow(record: Installation, refs: ReferenceData
     record.latitude,
     record.longitude,
     record.activationDate ?? "",
+    equipmentFieldValue(ruijieRouter, refs, "serial"),
     record.installerTeamLead,
     record.contractor,
     record.updatedBy,
@@ -2520,7 +2523,7 @@ function installationExcelClipboardRow(record: Installation, refs: ReferenceData
 }
 
 function xlsxInstallationRows(records: Installation[], refs: ReferenceData) {
-  const header = ["UNIT", "SCHOOL ID", "SITE NAME", "ISLAND GROUP", "REGION", "PROVINCE", "MUNICIPALITY", "BARANGAY", "Longitude", "Latitude", "STARLINK KIT NUMBER", "STARLINK DATE ACTIVATED", "AP 1 INDOOR SERIAL NUMBER", "AP 2 INDOOR SERIAL NUMBER", "AP 3 OUTDOOR SERIAL NUMBER", "RUIJIE ROUTER SERIAL NUMBER", "MSP", "MSP Installer/Team Lead", "CONFIG DATE", "CONTACT PERSON NAME", "CONTACT PERSON POSITION", "CONTACT NUMBER", "REMARKS"];
+  const header = ["UNIT", "SCHOOL ID", "SITE NAME", "ISLAND GROUP", "REGION", "PROVINCE", "MUNICIPALITY", "BARANGAY", "Longitude", "Latitude", "STARLINK KIT NUMBER", "STARLINK DATE ACTIVATED", "RUIJIE ROUTER SERIAL NUMBER", "AP 1 INDOOR SERIAL NUMBER", "AP 2 INDOOR SERIAL NUMBER", "AP 3 OUTDOOR SERIAL NUMBER", "MSP", "MSP Installer/Team Lead", "CONFIG DATE", "CONTACT PERSON NAME", "CONTACT PERSON POSITION", "CONTACT NUMBER", "REMARKS"];
   return [header, ...records.map((record, index) => {
     const activeComponents = record.components.filter((component) => !component.removedAt);
     const starlink = activeComponents.find((component) => exportMatchKey(component.type).includes("starlink"));
@@ -2528,7 +2531,7 @@ function xlsxInstallationRows(records: Installation[], refs: ReferenceData) {
     const outdoorAccessPoint = activeComponents.find((component) => isAccessPoint(component.type) && exportMatchKey(component.type).includes("outdoor"));
     const ruijieRouter = findRouterComponent(activeComponents);
     const contacts = beneficiaryContactList(record).filter(contactHasValue);
-    return [index + 1, record.id, record.siteName, record.islandGroup, record.region, record.province, record.municipality, record.barangay, record.longitude, record.latitude, equipmentFieldValue(starlink, refs, "kit"), record.activationDate ?? "", equipmentFieldValue(indoorAccessPoints[0], refs, "serial"), equipmentFieldValue(indoorAccessPoints[1], refs, "serial"), equipmentFieldValue(outdoorAccessPoint, refs, "serial"), equipmentFieldValue(ruijieRouter, refs, "serial"), record.contractor, record.installerTeamLead, record.installDate, contacts.map((contact) => contact.name.trim()).join("\n"), "", contacts.map((contact) => contact.phone.trim()).join("\n"), record.remarks];
+    return [index + 1, record.id, record.siteName, record.islandGroup, record.region, record.province, record.municipality, record.barangay, record.longitude, record.latitude, equipmentFieldValue(starlink, refs, "kit"), record.activationDate ?? "", equipmentFieldValue(ruijieRouter, refs, "serial"), equipmentFieldValue(indoorAccessPoints[0], refs, "serial"), equipmentFieldValue(indoorAccessPoints[1], refs, "serial"), equipmentFieldValue(outdoorAccessPoint, refs, "serial"), record.contractor, record.installerTeamLead, record.installDate, contacts.map((contact) => contact.name.trim()).join("\n"), "", contacts.map((contact) => contact.phone.trim()).join("\n"), record.remarks];
   })];
 }
 
