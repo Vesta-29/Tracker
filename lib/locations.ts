@@ -97,7 +97,7 @@ export function resolveLocation(input: LocationInput): LocationResolution {
     return { location: selection(region, province, municipality, barangay) };
   }
   if (!input.region || !input.province || !input.municipality) return { issue: "Complete Region, Province, and Locality" };
-  const matchingRegions = regions.filter((region) => matchesRegion(region, input.region) && matchesName(region.islandGroup, input.islandGroup));
+  const matchingRegions = regions.filter((region) => matchesRegion(region, input.region));
   if (!matchingRegions.length) return { issue: `Region not recognized: ${input.region}` };
   const matchingProvinces = matchingRegions.flatMap((region) => listProvinces(region.psgcCode).filter((province) => matchesName(province.provName, input.province)).map((province) => ({ region, province })));
   if (!matchingProvinces.length) return { issue: `Province not recognized under ${input.region}: ${input.province}` };
