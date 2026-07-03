@@ -133,19 +133,21 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .section-copy-actions .button svg { flex: 0 0 auto; }
 .site-scroll-top {
   position: fixed;
-  right: 22px;
-  bottom: 22px;
+  right: 24px;
+  bottom: 24px;
   z-index: 18;
-  width: 42px;
-  height: 42px;
-  color: var(--accent);
-  border-color: oklch(0.78 0.055 164);
-  background: oklch(0.995 0.004 155 / .96);
-  box-shadow: 0 6px 12px oklch(0.25 0.03 158 / .10);
-  backdrop-filter: blur(6px);
-  animation: site-scroll-top-enter 160ms var(--ease-out);
+  min-width: 78px;
+  min-height: 44px;
+  padding: 0 14px;
+  color: oklch(0.99 0.005 154);
+  border-color: oklch(0.34 0.08 158);
+  background: oklch(0.38 0.09 158);
+  box-shadow: 0 10px 22px oklch(0.24 0.045 158 / .20), 0 0 0 3px oklch(0.99 0.006 155 / .9);
+  font-weight: 800;
+  animation: site-scroll-top-enter 180ms var(--ease-out);
 }
-.site-scroll-top:hover:not(:disabled) { border-color: var(--accent); color: oklch(0.99 0.005 154); background: var(--accent); }
+.site-scroll-top:hover:not(:disabled) { border-color: oklch(0.28 0.075 158); color: oklch(0.99 0.005 154); background: var(--accent-hover); box-shadow: 0 12px 26px oklch(0.24 0.045 158 / .24), 0 0 0 3px oklch(0.99 0.006 155); }
+.site-scroll-top span { font-size: 13px; line-height: 1; }
 #site-details-section, #site-location-section, #required-additional-section, #optional-additional-section, #equipment-section, #beneficiary-contact-section, #remarks-photos-section { scroll-margin-top: 84px; }
 h1 { font-size: 23px; margin: 0; letter-spacing: -0.03em; }
 h2 { font-size: 17px; margin: 0; letter-spacing: -0.02em; }
@@ -731,7 +733,7 @@ tbody tr:last-child td { border-bottom: 0; }
   .site-section-nav { flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-inline: contain; padding-bottom: 1px; }
   .site-section-nav-button { min-height: 36px; }
   .site-section-count { display: none; }
-  .site-scroll-top { right: 14px; bottom: 14px; width: 44px; height: 44px; }
+  .site-scroll-top { right: 14px; bottom: calc(78px + env(safe-area-inset-bottom)); min-width: 86px; min-height: 48px; padding: 0 15px; }
   .site-fields.viewing > .section:not(.ownership-grid) { padding-top: 16px; padding-bottom: 16px; }
   .section { padding: 14px; }
   .section-title { align-items: start; flex-wrap: wrap; }

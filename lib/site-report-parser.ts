@@ -107,7 +107,14 @@ function labeledValueByAliasPriority(text: string, field: SiteReportField) {
 
 export function parseContractorAddress(value: string, fallbackToRaw = true) {
   const labeled = labeledValue(value, "address")?.value;
-  return clean(labeled || (fallbackToRaw ? value : ""));
+  return cleanContractorAddress(labeled || (fallbackToRaw ? value : ""));
+}
+
+function cleanContractorAddress(value: unknown) {
+  return clean(value)
+    .replace(/^["']?\s*\(?\s*to\s+be\s+verified\s+by\s+the\s+teacher\s*\/\s*principal\s*\)?\s*["']?\s*/i, "")
+    .replace(/^["']|["']$/g, "")
+    .trim();
 }
 
 const MONTHS: Record<string, number> = {

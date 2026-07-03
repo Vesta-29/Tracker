@@ -201,7 +201,9 @@ Teacher II
 
 BRGY. ZONE 16, TALISAY CITY, NEG. OCC.`)).toBe("BRGY. ZONE 16, TALISAY CITY, NEG. OCC.");
     expect(parseContractorAddress("Complete School Address (to be verified by the teacher/principal): BRGY. ZONE 16, TALISAY CITY, NEG. OCC.")).toBe("BRGY. ZONE 16, TALISAY CITY, NEG. OCC.");
+    expect(parseContractorAddress('Complete School Address : (to be verified by the teacher/principal) "BRGY. ZONE 16, TALISAY CITY, NEG. OCC."')).toBe("BRGY. ZONE 16, TALISAY CITY, NEG. OCC.");
     expect(parseContractorAddress("BRGY. ZONE 16, TALISAY CITY, NEG. OCC.")).toBe("BRGY. ZONE 16, TALISAY CITY, NEG. OCC.");
     expect(parseSiteActivationReport("School Name: Test ES\nComplete School Address (to be verified by the teacher/principal): BRGY. ZONE 16, TALISAY CITY, NEG. OCC.").values.address).toBe("BRGY. ZONE 16, TALISAY CITY, NEG. OCC.");
+    expect(parseSiteActivationReport('School Name: Test ES\nComplete School Address : (to be verified by the teacher/principal) "BRGY. ZONE 16, TALISAY CITY, NEG. OCC."').values.address).toBe("BRGY. ZONE 16, TALISAY CITY, NEG. OCC.");
   });
 });
