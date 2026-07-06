@@ -217,6 +217,10 @@ function niceDateTime(value?: string) {
   const date = validDate(value);
   return date ? new Intl.DateTimeFormat("en-PH", { timeZone: appTimeZone, month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }).format(date) : "None";
 }
+function excelDate(value?: string) {
+  const date = validDate(value);
+  return date ? new Intl.DateTimeFormat("en-PH", { timeZone: appTimeZone, month: "long", day: "numeric", year: "numeric" }).format(date) : "";
+}
 function dateTimeValue(value?: string) {
   const date = validDate(value);
   return date ? date.getTime() : 0;
@@ -2518,7 +2522,7 @@ function installationExcelClipboardRow(record: Installation, refs: ReferenceData
     equipmentFieldValue(starlink, refs, "kit"),
     record.latitude,
     record.longitude,
-    record.activationDate ?? "",
+    excelDate(record.activationDate),
     equipmentFieldValue(ruijieRouter, refs, "serial"),
     record.installerTeamLead,
     record.contractor,
@@ -2541,7 +2545,7 @@ function xlsxInstallationRows(records: Installation[], refs: ReferenceData) {
     const outdoorAccessPoint = activeComponents.find((component) => isAccessPoint(component.type) && exportMatchKey(component.type).includes("outdoor"));
     const ruijieRouter = findRouterComponent(activeComponents);
     const contacts = beneficiaryContactList(record).filter(contactHasValue);
-    return [index + 1, record.id, record.siteName, record.islandGroup, record.region, record.province, record.municipality, record.barangay, record.longitude, record.latitude, equipmentFieldValue(starlink, refs, "kit"), record.activationDate ?? "", equipmentFieldValue(ruijieRouter, refs, "serial"), equipmentFieldValue(indoorAccessPoints[0], refs, "serial"), equipmentFieldValue(indoorAccessPoints[1], refs, "serial"), equipmentFieldValue(outdoorAccessPoint, refs, "serial"), record.contractor, record.installerTeamLead, record.installDate, contacts.map((contact) => contact.name.trim()).join("\n"), "", contacts.map((contact) => contact.phone.trim()).join("\n"), record.remarks];
+    return [index + 1, record.id, record.siteName, record.islandGroup, record.region, record.province, record.municipality, record.barangay, record.longitude, record.latitude, equipmentFieldValue(starlink, refs, "kit"), excelDate(record.activationDate), equipmentFieldValue(ruijieRouter, refs, "serial"), equipmentFieldValue(indoorAccessPoints[0], refs, "serial"), equipmentFieldValue(indoorAccessPoints[1], refs, "serial"), equipmentFieldValue(outdoorAccessPoint, refs, "serial"), record.contractor, record.installerTeamLead, excelDate(record.installDate), contacts.map((contact) => contact.name.trim()).join("\n"), "", contacts.map((contact) => contact.phone.trim()).join("\n"), record.remarks];
   })];
 }
 
