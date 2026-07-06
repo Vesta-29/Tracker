@@ -136,6 +136,17 @@ function pageFromPathname(pathname: string): Page {
   if (pathname.startsWith("/admin/")) return "settings";
   return "dashboard";
 }
+function documentTitle(pathname: string, siteRecord?: Installation, siteDetailId = "") {
+  if (siteDetailId) return `${siteRecord?.siteName.trim() || siteRecord?.id || siteDetailId} | FieldTrack`;
+  if (pathname === "/dashboard") return "Dashboard | FieldTrack";
+  if (pathname === "/sites") return "Sites | FieldTrack";
+  if (pathname === "/sites/new") return "New site | FieldTrack";
+  if (pathname === "/service-visits") return "Service visits | FieldTrack";
+  if (pathname === "/service-visits/new") return "New service visit | FieldTrack";
+  if (pathname === "/import") return "Import | FieldTrack";
+  if (pathname.startsWith("/admin/")) return "Admin settings | FieldTrack";
+  return "FieldTrack";
+}
 function pathForPage(page: Page) {
   return ({ dashboard: "/dashboard", installations: "/sites", new: "/sites/new", serviceVisits: "/service-visits", import: "/import", settings: "/admin/contractors" } as const)[page];
 }
@@ -413,6 +424,7 @@ export default function TrackerApp() {
   const filters = useMemo(() => sanitizeSiteFilter(siteFilterFromSearchParams(new URLSearchParams(siteFilterParams)), records, refs), [records, refs, siteFilterParams]);
   const pendingFiltersRef = useRef<Filter | undefined>(undefined);
   const siteRecord = editing ?? (loadedRouteKey === routeKey ? records.find((record) => record.id === siteDetailId) : undefined);
+  useEffect(() => { document.title = documentTitle(pathname, siteRecord, siteDetailId); }, [pathname, siteDetailId, siteRecord]);
   const setPage = useCallback((next: Page) => {
     const query = next === "dashboard" || next === "installations" ? siteFilterQuery(pendingFiltersRef.current ?? filters) : "";
     pendingFiltersRef.current = undefined;
