@@ -47,7 +47,28 @@ const muncityByCode = byCode(muncities);
 const barangayByCode = byCode(barangays);
 const norm = (value?: string) => value?.trim().toLocaleLowerCase("en-PH").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, " ") ?? "";
 const locationName = (value?: string) => norm(value?.replace(/\([^)]*\)/g, " ")).replace(/^(?:city|municipality) of /, "").replace(/ (?:city|municipality)$/, "").replace(/^(?:barangay|brgy) /, "").trim();
-const matchesName = (expected: string, actual?: string) => !actual || locationName(expected) === locationName(actual);
+function editDistance(a: string, b: string) {
+  const previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i += 1) {
+    let diagonal = previous[0];
+    previous[0] = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const above = previous[j];
+      previous[j] = a[i - 1] === b[j - 1] ? diagonal : Math.min(previous[j] + 1, previous[j - 1] + 1, diagonal + 1);
+      diagonal = above;
+    }
+  }
+  return previous[b.length];
+}
+function closeLocationName(expected: string, actual: string) {
+  return expected.length >= 8 && actual.length >= 8 && Math.abs(expected.length - actual.length) <= 1 && editDistance(expected, actual) <= 1;
+}
+const matchesName = (expected: string, actual?: string) => {
+  if (!actual) return true;
+  const expectedName = locationName(expected);
+  const actualName = locationName(actual);
+  return expectedName === actualName || closeLocationName(expectedName, actualName);
+};
 const regionAliases: Record<string, string[]> = {
   "01": ["i", "1", "region i", "region 1", "ilocos region"],
   "02": ["ii", "2", "region ii", "region 2", "cagayan valley"],

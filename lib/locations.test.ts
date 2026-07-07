@@ -41,4 +41,22 @@ describe("resolveLocation", () => {
 
     expect(result.issue).not.toBe("Region not recognized: IX");
   });
+
+  it("resolves a directory locality with a minor spelling difference", () => {
+    const result = resolveLocation({
+      islandGroup: "Mindanao",
+      region: "VII",
+      province: "Cebu",
+      municipality: "Pinamungahan",
+      barangay: "Anislag",
+    });
+
+    expect(result.location).toMatchObject({
+      islandGroup: "Visayas",
+      region: "Region VII (Central Visayas)",
+      province: "Cebu",
+      municipality: "Pinamungajan",
+      barangay: "Anislag",
+    });
+  });
 });

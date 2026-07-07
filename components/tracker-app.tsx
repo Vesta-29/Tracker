@@ -1277,6 +1277,10 @@ function InstallationForm({
   const validationSummaryRef = useRef<HTMLDivElement>(null);
   useBlobUrlCleanup(record.photos);
 
+  useEffect(() => {
+    if (initial) document.title = documentTitle(`/sites/${record.id}`, record, record.id);
+  });
+
   const [original, setOriginal] = useState<Installation>(() => JSON.parse(JSON.stringify(record)));
   const isDirty = useMemo(() => {
     return JSON.stringify(record) !== JSON.stringify(original);
