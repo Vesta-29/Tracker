@@ -51,6 +51,8 @@ const aliases: Partial<Record<SiteReportField, readonly string[]>> = {
   remarks: ["Remarks", "Notes"],
   logInTime: ["Log-In Time", "Log In Time", "Login Time"],
 };
+const schoolIdAliases = ["School ID"];
+const siteCodeAliases = ["Site Code"];
 
 const clean = (value: unknown) => typeof value === "string" ? value.replace(/[\t\r\n]+/g, " ").replace(/\s+/g, " ").trim() : "";
 const cleanSerial = (value: unknown) => typeof value === "string" ? value.replace(/[\t\r\n]+/g, " ").trim() : "";
@@ -101,6 +103,20 @@ function labeledValueByAliasPriority(text: string, field: SiteReportField) {
       if (line.label && Object.values(aliases).some((group) => labelMatches(line.label, group ?? []))) break;
       return { value: raw, index: match.index };
     }
+  }
+  return undefined;
+}
+
+function labeledValueForCandidates(text: string, candidates: readonly string[]) {
+  const lines = splitLines(text);
+  const match = lines.find((line) => line.label && labelMatches(line.label, candidates));
+  if (!match) return undefined;
+  if (match.value) return { value: match.value, index: match.index };
+  for (const line of lines.slice(match.index + 1)) {
+    const raw = line.raw.trim();
+    if (!raw) continue;
+    if (line.label && Object.values(aliases).some((group) => labelMatches(line.label, group ?? []))) break;
+    return { value: raw, index: match.index };
   }
   return undefined;
 }
@@ -221,7 +237,7 @@ function multilineRemarks(text: string) {
 export function sanitizeSiteReportValues(input: unknown): SiteReportValues {
   const source = input && typeof input === "object" ? input as Record<string, unknown> : {};
   const values = Object.fromEntries(SITE_REPORT_FIELDS.map((field) => [field, clean(source[field])])) as SiteReportValues;
-  values.schoolId = values.schoolId.replace(/^\s*\(\s*school\s+id\s*\)\s*/i, "");
+  values.schoolId = normalizeSchoolId(values.schoolId);
   values.longitude = values.longitude.match(/-?\d{1,3}(?:\.\d+)?/)?.[0] ?? "";
   values.latitude = values.latitude.match(/-?\d{1,3}(?:\.\d+)?/)?.[0] ?? "";
   values.commboxLongitude = values.commboxLongitude.match(/-?\d{1,3}(?:\.\d+)?/)?.[0] ?? "";
@@ -232,10 +248,20 @@ export function sanitizeSiteReportValues(input: unknown): SiteReportValues {
   return values;
 }
 
+function normalizeSchoolId(value: string) {
+  const withoutMarker = value.replace(/^\s*\(\s*school\s+id\s*\)\s*/i, "").trim();
+  const sixDigit = withoutMarker.match(/\b\d{6}\b/)?.[0] ?? "";
+  if (/^\s*ELRN\b/i.test(withoutMarker)) return sixDigit;
+  return sixDigit || withoutMarker;
+}
+
 export function parseSiteActivationReport(text: string): SiteReportExtraction {
   const coordinates = coordinateSections(text);
   const beneficiary = beneficiaryBlock(text);
   const raw = Object.fromEntries(SITE_REPORT_FIELDS.map((field) => [field, labeledValue(text, field)?.value ?? ""])) as SiteReportValues;
+  const schoolIdValue = labeledValueForCandidates(text, schoolIdAliases)?.value ?? "";
+  const siteCodeValue = labeledValueForCandidates(text, siteCodeAliases)?.value ?? "";
+  raw.schoolId = normalizeSchoolId(schoolIdValue) || normalizeSchoolId(siteCodeValue);
   raw.address = parseContractorAddress(text, false);
   raw.latitude = coordinates.latitude;
   raw.longitude = coordinates.longitude;

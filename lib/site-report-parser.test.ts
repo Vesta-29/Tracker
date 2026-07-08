@@ -67,6 +67,18 @@ describe("parseSiteActivationReport", () => {
     expect(result.values).toMatchObject({ schoolId: "42", siteName: "Test ES", ruijieRouterSerial: "R-1", activationDate: "2026-06-25", latitude: "10.1", longitude: "120.2" });
   });
 
+  it("prioritizes School ID over Site Code", () => {
+    const result = parseSiteActivationReport(`Site Code: ELRN-L2-0670
+School ID: 119552
+School Name: Test ES`);
+    expect(result.values.schoolId).toBe("119552");
+  });
+
+  it("ignores ELRN-prefixed IDs and uses the 6-digit school ID", () => {
+    expect(parseSiteActivationReport("School ID: ELRN-L2-0670 119552\nSchool Name: Test ES").values.schoolId).toBe("119552");
+    expect(parseSiteActivationReport("School ID:  ELRN-L2-0670\nSite Code: 119552\nSchool Name: Test ES").values.schoolId).toBe("119552");
+  });
+
   it("handles labels with a colon and no following space", () => {
     const result = parseSiteActivationReport(`Site Code:500604
 School Name:Agno Elementary School
