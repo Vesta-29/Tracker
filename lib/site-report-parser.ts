@@ -69,7 +69,11 @@ const inlineLabelPattern = new RegExp(
   String.raw`(^|[^\r\n])\s*(${Object.values(aliases).flatMap((group) => group ?? []).sort((a, b) => b.length - a.length).map(escapeRegex).join("|")})\s*:`,
   "gi",
 );
-const normalizeInlineLabels = (text: string) => text.replace(inlineLabelPattern, (_match, prefix: string, label: string) => `${prefix}${prefix ? "\n" : ""}${label}:`);
+const normalizeWrappedLabels = (text: string) => text.replace(
+  /(contact\s+person\s*\(\s*school\s+head\s*\/?\s*ict)\s*\r?\n\s*(teacher\s*\)\s*:)/gi,
+  "$1 $2",
+);
+const normalizeInlineLabels = (text: string) => normalizeWrappedLabels(text).replace(inlineLabelPattern, (_match, prefix: string, label: string) => `${prefix}${prefix ? "\n" : ""}${label}:`);
 
 const splitLines = (text: string) => normalizeInlineLabels(text).split(/\r?\n/).map((raw, index) => {
   const colon = raw.indexOf(":");
@@ -208,14 +212,17 @@ function coordinateSections(text: string) {
 function beneficiaryBlock(text: string) {
   const lines = splitLines(text);
   const nameMatch = labeledValueByAliasPriority(text, "beneficiaryName");
+  const schoolName = labeledValue(text, "siteName")?.value ?? "";
+  const contactName = labeledValueForCandidates(text, ["Contact Person (School Head/ICT Teacher)", "Contact Person", "School Contact", "Primary Contact"])?.value ?? "";
   const explicitRole = labeledValue(text, "beneficiaryRole")?.value ?? "";
   const explicitPhone = labeledValue(text, "beneficiaryPhone")?.value ?? "";
   if (!nameMatch) return { name: "", role: explicitRole, phone: explicitPhone };
   const followers = lines.slice(nameMatch.index + 1).map((line) => line.raw.trim()).filter(Boolean);
   const unlabeled = followers.filter((line) => !line.includes(":"));
   const phoneIndex = unlabeled.findIndex((line) => /(?:\+?63|0)\s*\d[\d\s()-]{7,}/.test(line));
+  const name = schoolName && normalizeLabel(nameMatch.value) === normalizeLabel(schoolName) && contactName ? contactName : nameMatch.value;
   return {
-    name: nameMatch.value,
+    name,
     role: explicitRole || (phoneIndex > 0 ? unlabeled[phoneIndex - 1] : unlabeled.find((line) => !/(?:\+?63|0)\s*\d/.test(line)) ?? ""),
     phone: explicitPhone || (phoneIndex >= 0 ? unlabeled[phoneIndex] : ""),
   };

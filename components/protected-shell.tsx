@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { ChevronDown, ClipboardList, KeyRound, LayoutDashboard, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Pencil, RadioTower, Settings, Upload, Wrench, X } from "lucide-react";
+import { ChevronDown, ClipboardList, KeyRound, LayoutDashboard, LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, Pencil, RadioTower, Settings, Sun, Upload, Wrench, X } from "lucide-react";
 import { changePassword, signOut, updateOwnProfile } from "@/lib/supabase-repository";
 import type { Profile } from "@/lib/types";
 import { ChangeDisplayNameModal, ChangePasswordModal, ConfirmLogoutModal, invalidateRouteWorkspaceCache } from "@/components/tracker-app";
@@ -19,6 +19,8 @@ const nav = [
 
 const sidebarStorageKey = "fieldtrack:sidebar-collapsed";
 const sidebarStorageEvent = "fieldtrack-sidebar-collapsed";
+const themeStorageKey = "fieldtrack:theme";
+const themeStorageEvent = "fieldtrack-theme";
 
 function activeRoute(pathname: string, href: string) {
   if (href === "/sites") return pathname.startsWith("/sites");
@@ -50,6 +52,20 @@ function sidebarPreferenceSnapshot() {
 function serverSidebarPreferenceSnapshot() {
   return false;
 }
+function subscribeThemePreference(callback: () => void) {
+  window.addEventListener("storage", callback);
+  window.addEventListener(themeStorageEvent, callback);
+  return () => {
+    window.removeEventListener("storage", callback);
+    window.removeEventListener(themeStorageEvent, callback);
+  };
+}
+function themePreferenceSnapshot() {
+  return window.localStorage.getItem(themeStorageKey) === "dark";
+}
+function serverThemePreferenceSnapshot() {
+  return false;
+}
 
 export default function ProtectedShell({ initialProfile, children }: { initialProfile: Profile; children: React.ReactNode }) {
   return <GuardedNavigationProvider><ProtectedShellContent initialProfile={initialProfile}>{children}</ProtectedShellContent></GuardedNavigationProvider>;
@@ -62,6 +78,7 @@ function ProtectedShellContent({ initialProfile, children }: { initialProfile: P
   const [profile, setProfile] = useState(initialProfile);
   const [mobileMenu, setMobileMenu] = useState(false);
   const sidebarCollapsed = useSyncExternalStore(subscribeSidebarPreference, sidebarPreferenceSnapshot, serverSidebarPreferenceSnapshot);
+  const darkMode = useSyncExternalStore(subscribeThemePreference, themePreferenceSnapshot, serverThemePreferenceSnapshot);
   const [accountMenu, setAccountMenu] = useState(false);
   const [nameModal, setNameModal] = useState(false);
   const [passwordModal, setPasswordModal] = useState(false);
@@ -82,6 +99,9 @@ function ProtectedShellContent({ initialProfile, children }: { initialProfile: P
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, [accountMenu]);
+  useEffect(() => {
+    document.documentElement.dataset.theme = darkMode ? "dark" : "light";
+  }, [darkMode]);
   function moveAccountFocus(event: React.KeyboardEvent, direction: "first" | "last" | "next" | "previous") {
     const items = [...(accountItemsRef.current?.querySelectorAll<HTMLButtonElement>("[role='menuitem']") ?? [])];
     if (!items.length) return;
@@ -101,7 +121,12 @@ function ProtectedShellContent({ initialProfile, children }: { initialProfile: P
     window.localStorage.setItem(sidebarStorageKey, String(!sidebarCollapsed));
     window.dispatchEvent(new Event(sidebarStorageEvent));
   }
+  function toggleDarkMode() {
+    window.localStorage.setItem(themeStorageKey, darkMode ? "light" : "dark");
+    window.dispatchEvent(new Event(themeStorageEvent));
+  }
   const SidebarToggleIcon = sidebarCollapsed ? PanelLeftOpen : PanelLeftClose;
+  const ThemeIcon = darkMode ? Sun : Moon;
   return <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
     <DialogFocusManager />
     <aside className="sidebar">
@@ -112,25 +137,30 @@ function ProtectedShellContent({ initialProfile, children }: { initialProfile: P
       <header className="topbar">
         <div className="mobile-brand"><span className="brand-mark"><RadioTower size={16} /></span>FieldTrack</div>
         <div className="muted small desktop-context">Internal site registry</div>
-        <div className="account-menu-wrap" ref={accountMenuRef}>
-          <button type="button" className="account-trigger" aria-haspopup="menu" aria-expanded={accountMenu} onClick={() => setAccountMenu((open) => !open)} onKeyDown={(event) => {
-            if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-            event.preventDefault();
-            const direction = event.key === "ArrowDown" ? "first" : "last";
-            setAccountMenu(true);
-            requestAnimationFrame(() => {
-              const items = [...(accountItemsRef.current?.querySelectorAll<HTMLButtonElement>("[role='menuitem']") ?? [])];
-              items[direction === "first" ? 0 : items.length - 1]?.focus();
-            });
-          }}>
-            <span className="account-trigger-copy"><strong>{profile.fullName}</strong><small>{profile.role === "admin" ? "Administrator" : profile.role === "guest" ? "Guest" : "Staff"}</small></span>
-            <ChevronDown size={15} aria-hidden="true" />
+        <div className="topbar-actions">
+          <button type="button" className="theme-toggle" aria-label={darkMode ? "Switch to light mode" : "Switch to dark mode"} aria-pressed={darkMode} title={darkMode ? "Light mode" : "Dark mode"} onClick={toggleDarkMode}>
+            <ThemeIcon size={16} aria-hidden="true" />
           </button>
-          {accountMenu && <div className="account-menu" role="menu" ref={accountItemsRef} onKeyDown={accountMenuKeyDown}>
-            <button type="button" role="menuitem" onClick={() => { setAccountMenu(false); setNameModal(true); }}><Pencil size={15} />Change display name</button>
-            <button type="button" role="menuitem" onClick={() => { setAccountMenu(false); setPasswordModal(true); }}><KeyRound size={15} />Change password</button>
-            <button type="button" className="danger" role="menuitem" onClick={() => { setAccountMenu(false); setLogoutModal(true); }}><LogOut size={15} />Log out</button>
-          </div>}
+          <div className="account-menu-wrap" ref={accountMenuRef}>
+            <button type="button" className="account-trigger" aria-haspopup="menu" aria-expanded={accountMenu} onClick={() => setAccountMenu((open) => !open)} onKeyDown={(event) => {
+              if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+              event.preventDefault();
+              const direction = event.key === "ArrowDown" ? "first" : "last";
+              setAccountMenu(true);
+              requestAnimationFrame(() => {
+                const items = [...(accountItemsRef.current?.querySelectorAll<HTMLButtonElement>("[role='menuitem']") ?? [])];
+                items[direction === "first" ? 0 : items.length - 1]?.focus();
+              });
+            }}>
+              <span className="account-trigger-copy"><strong>{profile.fullName}</strong><small>{profile.role === "admin" ? "Administrator" : profile.role === "guest" ? "Guest" : "Staff"}</small></span>
+              <ChevronDown size={15} aria-hidden="true" />
+            </button>
+            {accountMenu && <div className="account-menu" role="menu" ref={accountItemsRef} onKeyDown={accountMenuKeyDown}>
+              <button type="button" role="menuitem" onClick={() => { setAccountMenu(false); setNameModal(true); }}><Pencil size={15} />Change display name</button>
+              <button type="button" role="menuitem" onClick={() => { setAccountMenu(false); setPasswordModal(true); }}><KeyRound size={15} />Change password</button>
+              <button type="button" className="danger" role="menuitem" onClick={() => { setAccountMenu(false); setLogoutModal(true); }}><LogOut size={15} />Log out</button>
+            </div>}
+          </div>
         </div>
       </header>
       <div className="content">{children}</div>

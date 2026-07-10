@@ -131,6 +131,16 @@ Contact Person (School Head/ICT Teacher):Redemcion F Maulawin`);
     expect(result.values.beneficiaryName).toBe("Redemcion F Maulawin");
   });
 
+  it("uses a wrapped contact person label when beneficiary is the school name", () => {
+    const result = parseSiteActivationReport(`School Name: PALHO ELEMENTARY SCHOOL
+Beneficiary:  PALHO ELEMENTARY SCHOOL
+Contact person (SCHOOL Head ICT
+Teacher): RHEALYN HERMOSA - DELOS SANTOS
+Active Contact Number: 09093351382`);
+    expect(result.values.beneficiaryName).toBe("RHEALYN HERMOSA - DELOS SANTOS");
+    expect(result.values.beneficiaryPhone).toBe("09093351382");
+  });
+
   it("captures multiline remarks and tolerates missing optional fields", () => {
     const result = parseSiteActivationReport("School Name: Small ES\nRemarks: First line\nSecond line");
     expect(result.values.remarks).toBe("First line Second line");
