@@ -166,6 +166,7 @@ export function normalizeSiteReportDate(value: unknown) {
 }
 
 function coordinatePair(text: string) {
+  const source = text.replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "");
   const parseDirected = (match: RegExpMatchArray | null, axis: "latitude" | "longitude") => {
     if (!match) return "";
     const value = Number(match[1]) * (/[SW]/i.test(match[2] ?? "") ? -1 : 1);
@@ -173,17 +174,18 @@ function coordinatePair(text: string) {
     return Math.abs(value) <= limit ? String(value) : "";
   };
   const degree = String.raw`(?:\u00b0|Â°)?`;
-  const latitude = parseDirected(text.match(new RegExp(String.raw`\blat(?:itude)?\b\s*[:=]?\s*(-?\d{1,3}(?:\.\d+)?)\s*${degree}\s*([NS])?`, "i")), "latitude");
-  const longitude = parseDirected(text.match(new RegExp(String.raw`\b(?:long(?:itude)?|lng)\b\s*[:=]?\s*(-?\d{1,3}(?:\.\d+)?)\s*${degree}\s*([EW])?`, "i")), "longitude");
+  const labelSeparator = String.raw`(?:[:=\-–—])?`;
+  const latitude = parseDirected(source.match(new RegExp(String.raw`\blat(?:itude)?\b\s*${labelSeparator}\s*(-?\d{1,3}(?:\.\d+)?)\s*${degree}\s*([NS])?`, "i")), "latitude");
+  const longitude = parseDirected(source.match(new RegExp(String.raw`\b(?:long(?:itude)?|lng)\b\s*${labelSeparator}\s*(-?\d{1,3}(?:\.\d+)?)\s*${degree}\s*([EW])?`, "i")), "longitude");
   if (latitude || longitude) return { latitude, longitude };
-  const directedPair = text.match(new RegExp(String.raw`\(?\s*(\d{1,3}(?:\.\d+)?)\s*${degree}\s*([NS])\s*[,;/ ]+\s*(\d{1,3}(?:\.\d+)?)\s*${degree}\s*([EW])\s*\)?`, "i"));
+  const directedPair = source.match(new RegExp(String.raw`\(?\s*(\d{1,3}(?:\.\d+)?)\s*${degree}\s*([NS])\s*[,;/ ]+\s*(\d{1,3}(?:\.\d+)?)\s*${degree}\s*([EW])\s*\)?`, "i"));
   if (directedPair) {
     const lat = Number(directedPair[1]) * (directedPair[2].toUpperCase() === "S" ? -1 : 1);
     const lng = Number(directedPair[3]) * (directedPair[4].toUpperCase() === "W" ? -1 : 1);
     if (Math.abs(lat) <= 90 && Math.abs(lng) <= 180) return { latitude: String(lat), longitude: String(lng) };
   }
-  const labeledPair = text.match(/\b(?:actual\s+)?coordinates?\b(?:\s*\([^)]*\))?\s*[:=]?\s*\(?\s*(-?\d{1,3}\.\d+)\s*[,;/ ]+\s*(-?\d{1,3}\.\d+)\s*\)?/i);
-  const plainPair = text.match(/(?:^|\n|\s|\()(-?\d{1,3}\.\d+)\s*[,;/ ]+\s*(-?\d{1,3}\.\d+)(?:\s|$|\))/);
+  const labeledPair = source.match(/\b(?:actual\s+)?coordinates?\b(?:\s*\([^)]*\))?\s*[:=]?\s*\(?\s*(-?\d{1,3}\.\d+)\s*[,;/ ]+\s*(-?\d{1,3}\.\d+)\s*\)?/i);
+  const plainPair = source.match(/(?:^|\n|\s|\()(-?\d{1,3}\.\d+)\s*[,;/ ]+\s*(-?\d{1,3}\.\d+)(?:\s|$|\))/);
   const pair = labeledPair ?? plainPair;
   if (!pair) return { latitude: "", longitude: "" };
   const first = Number(pair[1]);

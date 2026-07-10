@@ -207,6 +207,13 @@ Teacher II
     expect(parenthesized.diagnostics).toContain("Flag Pole coordinates selected for the site.");
   });
 
+  it("accepts MSP lat-long labels separated by hyphens", () => {
+    expect(parseSiteActivationReport("\u200eLat- 11.9211396\n\u200eLong- 124.000622").values).toMatchObject({
+      latitude: "11.9211396",
+      longitude: "124.000622",
+    });
+  });
+
   it("accepts degree coordinates with cardinal directions", () => {
     expect(parseSiteActivationReport("Actual Coordinates: 10.577450°N, 123.423355°E").values).toMatchObject({
       latitude: "10.57745",
