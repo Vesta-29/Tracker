@@ -52,7 +52,7 @@ export async function POST(request: Request) {
     const values = sanitizeSiteReportValues(JSON.parse(result.text));
     if (!values.activationDate && values.installDate) values.activationDate = values.installDate;
     const missing = SITE_REPORT_FIELDS.filter((field) => !values[field] && !field.startsWith("commbox") && field !== "logInTime");
-    return NextResponse.json({ extraction: { values, found: SITE_REPORT_FIELDS.filter((field) => Boolean(values[field])).length, missing, diagnostics: ["Checked with Gemini."] } });
+    return NextResponse.json({ extraction: { values, found: SITE_REPORT_FIELDS.filter((field) => Boolean(values[field])).length, missing, diagnostics: ["Checked with Gemini."], decisions: [] } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to extract report.";
     if (/session|access/i.test(message)) return NextResponse.json({ error: message }, { status: 403 });

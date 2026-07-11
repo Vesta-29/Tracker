@@ -329,6 +329,9 @@ html[data-theme="dark"] .remarks-photo-dropzone,
 html[data-theme="dark"] .dropzone,
 html[data-theme="dark"] .site-fields.viewing .component-template-row,
 html[data-theme="dark"] .button.ghost.equipment-copy-button { background: var(--surface); border-color: var(--line); }
+html[data-theme="dark"] .extraction-decision-strip { background: oklch(0.29 0.038 164); border-color: oklch(0.52 0.06 164); }
+html[data-theme="dark"] .extraction-decision-item { background: oklch(0.245 0.022 158); border-color: oklch(0.48 0.048 164); }
+html[data-theme="dark"] .extraction-decision-item strong { color: oklch(0.78 0.105 164); }
 html[data-theme="dark"] .paste-report-summary > ul,
 html[data-theme="dark"] .contractor-review-note { color: oklch(0.84 0.1 78); }
 html[data-theme="dark"] .removed-component { background: oklch(0.28 0.035 28); }
@@ -464,6 +467,10 @@ tbody tr:last-child td { border-bottom: 0; }
 .extraction-review-list { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
 .extraction-review-item { display: inline-grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 6px; max-width: min(100%, 330px); min-height: 30px; border: 1px solid oklch(0.84 0.035 155); border-radius: 7px; padding: 5px 8px; color: var(--ink); background: oklch(0.99 0.006 155); font-size: 12px; text-align: left; cursor: pointer; transition: border-color 160ms var(--ease-out), background-color 160ms var(--ease-out), color 160ms var(--ease-out); }
 .extraction-review-item span { color: var(--ink-muted); font-weight: 750; }
+.extraction-decision-strip { border-color: oklch(0.8 0.05 164); background: oklch(0.965 0.022 164); }
+.extraction-decision-strip .extraction-review-head { color: var(--accent); }
+.extraction-decision-item { border-color: oklch(0.78 0.045 164); background: var(--surface); }
+.extraction-decision-item strong { color: var(--accent); }
 .extraction-review-item strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 750; }
 .extraction-review-item:hover, .extraction-review-item:focus-visible { border-color: oklch(0.72 0.07 164); background: var(--accent-soft); color: var(--accent); }
 .site-details-polish .section-title { margin-bottom: 16px; }

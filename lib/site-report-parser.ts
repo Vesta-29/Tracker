@@ -30,7 +30,9 @@ export type SiteReportExtraction = {
   found: number;
   missing: SiteReportField[];
   diagnostics: string[];
+  decisions?: SiteReportDecision[];
 };
+export type SiteReportDecision = { key: string; label: string; value: string };
 
 const aliases: Partial<Record<SiteReportField, readonly string[]>> = {
   schoolId: ["School ID", "Site Code"],
@@ -218,15 +220,18 @@ function beneficiaryBlock(text: string) {
   const contactName = labeledValueForCandidates(text, ["Contact Person (School Head/ICT Teacher)", "Contact Person", "School Contact", "Primary Contact"])?.value ?? "";
   const explicitRole = labeledValue(text, "beneficiaryRole")?.value ?? "";
   const explicitPhone = labeledValue(text, "beneficiaryPhone")?.value ?? "";
-  if (!nameMatch) return { name: "", role: explicitRole, phone: explicitPhone };
+  if (!nameMatch) return { name: "", role: explicitRole, phone: explicitPhone, source: "" };
   const followers = lines.slice(nameMatch.index + 1).map((line) => line.raw.trim()).filter(Boolean);
   const unlabeled = followers.filter((line) => !line.includes(":"));
   const phoneIndex = unlabeled.findIndex((line) => /(?:\+?63|0)\s*\d[\d\s()-]{7,}/.test(line));
-  const name = schoolName && normalizeLabel(nameMatch.value) === normalizeLabel(schoolName) && contactName ? contactName : nameMatch.value;
+  const usedContactPerson = Boolean(schoolName && normalizeLabel(nameMatch.value) === normalizeLabel(schoolName) && contactName);
+  const name = usedContactPerson ? contactName : nameMatch.value;
+  const source = usedContactPerson || Boolean(contactName && normalizeLabel(name) === normalizeLabel(contactName)) ? "School Head/ICT Teacher contact" : "Beneficiary label";
   return {
     name,
     role: explicitRole || (phoneIndex > 0 ? unlabeled[phoneIndex - 1] : unlabeled.find((line) => !/(?:\+?63|0)\s*\d/.test(line)) ?? ""),
     phone: explicitPhone || (phoneIndex >= 0 ? unlabeled[phoneIndex] : ""),
+    source,
   };
 }
 
@@ -267,10 +272,13 @@ function normalizeSchoolId(value: string) {
 export function parseSiteActivationReport(text: string): SiteReportExtraction {
   const coordinates = coordinateSections(text);
   const beneficiary = beneficiaryBlock(text);
+  const decisions: SiteReportDecision[] = [];
   const raw = Object.fromEntries(SITE_REPORT_FIELDS.map((field) => [field, labeledValue(text, field)?.value ?? ""])) as SiteReportValues;
   const schoolIdValue = labeledValueForCandidates(text, schoolIdAliases)?.value ?? "";
   const siteCodeValue = labeledValueForCandidates(text, siteCodeAliases)?.value ?? "";
-  raw.schoolId = normalizeSchoolId(schoolIdValue) || normalizeSchoolId(siteCodeValue);
+  const normalizedSchoolId = normalizeSchoolId(schoolIdValue);
+  const normalizedSiteCode = normalizeSchoolId(siteCodeValue);
+  raw.schoolId = normalizedSchoolId || normalizedSiteCode;
   raw.address = parseContractorAddress(text, false);
   raw.latitude = coordinates.latitude;
   raw.longitude = coordinates.longitude;
@@ -282,10 +290,19 @@ export function parseSiteActivationReport(text: string): SiteReportExtraction {
   raw.remarks = multilineRemarks(text);
   const values = sanitizeSiteReportValues(raw);
   if (!values.activationDate && values.installDate) values.activationDate = values.installDate;
+  if (values.schoolId) {
+    const sourceLabel = normalizedSchoolId ? "School ID" : "Site Code";
+    const sourceValue = normalizedSchoolId ? schoolIdValue : siteCodeValue;
+    const ignoredElrn = /^\s*ELRN\b/i.test(sourceValue);
+    decisions.push({ key: "school-id-source", label: "School ID found", value: ignoredElrn ? `${values.schoolId}, ignored ELRN code from ${sourceLabel}` : `${values.schoolId} from ${sourceLabel}` });
+  }
+  if (beneficiary.name && beneficiary.source) decisions.push({ key: "contact-name-source", label: "Contact name source", value: beneficiary.source });
+  if ((values.latitude || values.longitude) && coordinates.usedFlagPole) decisions.push({ key: "coordinate-source", label: "Coordinates used", value: "Flag Pole coordinates" });
+  if (values.address && /to\s+be\s+verified\s+by\s+the\s+teacher\s*\/\s*principal/i.test(text)) decisions.push({ key: "address-cleaned", label: "Address cleaned", value: "Ignored verification note" });
   const missing = SITE_REPORT_FIELDS.filter((field) => !values[field] && !field.startsWith("commbox") && field !== "logInTime");
   const diagnostics: string[] = [];
   if (coordinates.usedFlagPole || /flag\s*pole/i.test(text)) diagnostics.push("Flag Pole coordinates selected for the site.");
   if (values.commboxLatitude || values.commboxLongitude) diagnostics.push(`Commbox coordinates: ${values.commboxLatitude || "?"}, ${values.commboxLongitude || "?"}.`);
   if (values.logInTime) diagnostics.push(`Log-In Time: ${values.logInTime}.`);
-  return { values, found: SITE_REPORT_FIELDS.filter((field) => Boolean(values[field])).length, missing, diagnostics };
+  return { values, found: SITE_REPORT_FIELDS.filter((field) => Boolean(values[field])).length, missing, diagnostics, decisions };
 }

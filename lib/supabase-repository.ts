@@ -108,7 +108,7 @@ export async function searchSchoolDirectory(query: string) {
   return data.map(mapSchoolDirectoryEntry);
 }
 
-export async function findSchoolDirectoryEntry(input: { schoolId?: string; schoolName?: string }) {
+export async function findSchoolDirectoryEntry(input: { schoolId?: string; schoolName?: string; siteCode?: string }) {
   const schoolId = input.schoolId?.trim();
   if (schoolId) {
     const { data, error } = await supabase().from("school_directory_entries").select(schoolDirectoryColumns).ilike("school_id", schoolId).limit(2);
@@ -118,6 +118,12 @@ export async function findSchoolDirectoryEntry(input: { schoolId?: string; schoo
       if (legacy.data.length === 1) return mapSchoolDirectoryEntry(legacy.data[0]);
     } else if (error) throw error;
     else if (data.length === 1) return mapSchoolDirectoryEntry(data[0]);
+  }
+  const siteCode = input.siteCode?.trim();
+  if (siteCode) {
+    const { data, error } = await supabase().from("school_directory_entries").select(schoolDirectoryColumns).ilike("site_code", siteCode).limit(2);
+    if (error && !missingDirectoryColumn(error)) throw error;
+    else if (!error && data.length === 1) return mapSchoolDirectoryEntry(data[0]);
   }
   const schoolName = input.schoolName?.trim();
   if (!schoolName) return null;

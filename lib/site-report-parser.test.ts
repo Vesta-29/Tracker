@@ -72,10 +72,13 @@ describe("parseSiteActivationReport", () => {
 School ID: 119552
 School Name: Test ES`);
     expect(result.values.schoolId).toBe("119552");
+    expect(result.decisions).toContainEqual({ key: "school-id-source", label: "School ID found", value: "119552 from School ID" });
   });
 
   it("ignores ELRN-prefixed IDs and uses the 6-digit school ID", () => {
-    expect(parseSiteActivationReport("School ID: ELRN-L2-0670 119552\nSchool Name: Test ES").values.schoolId).toBe("119552");
+    const elrnSchoolId = parseSiteActivationReport("School ID: ELRN-L2-0670 119552\nSchool Name: Test ES");
+    expect(elrnSchoolId.values.schoolId).toBe("119552");
+    expect(elrnSchoolId.decisions).toContainEqual({ key: "school-id-source", label: "School ID found", value: "119552, ignored ELRN code from School ID" });
     expect(parseSiteActivationReport("School ID:  ELRN-L2-0670\nSite Code: 119552\nSchool Name: Test ES").values.schoolId).toBe("119552");
   });
 
@@ -129,6 +132,7 @@ Long:123.423355\u00b0E`);
     const result = parseSiteActivationReport(`Beneficiary:San Andres elementary school
 Contact Person (School Head/ICT Teacher):Redemcion F Maulawin`);
     expect(result.values.beneficiaryName).toBe("Redemcion F Maulawin");
+    expect(result.decisions).toContainEqual({ key: "contact-name-source", label: "Contact name source", value: "School Head/ICT Teacher contact" });
   });
 
   it("uses a wrapped contact person label when beneficiary is the school name", () => {
@@ -139,6 +143,7 @@ Teacher): RHEALYN HERMOSA - DELOS SANTOS
 Active Contact Number: 09093351382`);
     expect(result.values.beneficiaryName).toBe("RHEALYN HERMOSA - DELOS SANTOS");
     expect(result.values.beneficiaryPhone).toBe("09093351382");
+    expect(result.decisions).toContainEqual({ key: "contact-name-source", label: "Contact name source", value: "School Head/ICT Teacher contact" });
   });
 
   it("captures multiline remarks and tolerates missing optional fields", () => {

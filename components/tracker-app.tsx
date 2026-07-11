@@ -84,7 +84,8 @@ function defaultNewSiteComponents(refs: ReferenceData) { return orderedByDisplay
 type ExtractionEquipmentSlot = "starlink" | "indoor1" | "indoor2" | "outdoor" | "router";
 type AutoEquipmentValue = { componentId: string; fieldId: string; value: string; generated: boolean };
 type ExtractionReviewItem = { key: string; label: string; value: string; target: string };
-type ExtractionSummary = { filled: number; missing: number; warnings: string[]; diagnostics: string[]; source: "local" | "gemini"; applied: ExtractionReviewItem[] };
+type ExtractionDecisionItem = { key: string; label: string; value: string; target?: string };
+type ExtractionSummary = { filled: number; missing: number; warnings: string[]; diagnostics: string[]; source: "local" | "gemini"; applied: ExtractionReviewItem[]; decisions: ExtractionDecisionItem[] };
 const equipmentSlotValues: Record<ExtractionEquipmentSlot, keyof SiteReportValues> = { starlink: "starlinkKitNumber", indoor1: "ap1IndoorSerial", indoor2: "ap2IndoorSerial", outdoor: "ap3OutdoorSerial", router: "ruijieRouterSerial" };
 function extractionTypeMatch(slot: ExtractionEquipmentSlot, name: string) {
   const value = name.toLowerCase();
@@ -1265,6 +1266,10 @@ function InstallationForm({
   const [schoolIdMatches, setSchoolIdMatches] = useState<SchoolDirectoryEntry[]>([]);
   const [schoolIdLookupOpen, setSchoolIdLookupOpen] = useState(false);
   const [schoolIdLookupIndex, setSchoolIdLookupIndex] = useState(0);
+  const [siteCodeQuery, setSiteCodeQuery] = useState("");
+  const [siteCodeMatches, setSiteCodeMatches] = useState<SchoolDirectoryEntry[]>([]);
+  const [siteCodeLookupOpen, setSiteCodeLookupOpen] = useState(false);
+  const [siteCodeLookupIndex, setSiteCodeLookupIndex] = useState(0);
   const [schoolLookupNotice, setSchoolLookupNotice] = useState("");
   const [directoryValidationError, setDirectoryValidationError] = useState("");
   const [matchedDirectorySchoolId, setMatchedDirectorySchoolId] = useState("");
@@ -1332,6 +1337,15 @@ function InstallationForm({
   }, [record.id, schoolIdLookupOpen]);
 
   useEffect(() => {
+    if (!siteCodeLookupOpen || siteCodeQuery.trim().length < 2) return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      void searchSchoolDirectory(siteCodeQuery).then((matches) => { if (active) { setSiteCodeMatches(matches); setSiteCodeLookupIndex(0); } }).catch(() => { if (active) setSiteCodeMatches([]); });
+    }, 250);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [siteCodeQuery, siteCodeLookupOpen]);
+
+  useEffect(() => {
     const schoolId = record.id.trim();
     if (schoolId.length < 2) return;
     let active = true;
@@ -1372,20 +1386,35 @@ function InstallationForm({
       setSchoolLookupNotice("School selected. School ID, site name, and location were updated.");
     } else if (!resolved) setSchoolLookupNotice(`School selected, but its spreadsheet location could not be matched to PSGC data.${resolutionIssue ? ` ${resolutionIssue}` : ""}`);
     patch(next);
+    setSiteCodeQuery(selected.siteCode);
     setSchoolLookupOpen(false);
     setSchoolMatches([]);
     setSchoolIdLookupOpen(false);
     setSchoolIdMatches([]);
+    setSiteCodeLookupOpen(false);
+    setSiteCodeMatches([]);
   }
 
   async function applyReportExtraction(extraction: SiteReportExtraction, source: "local" | "gemini") {
     const values = extraction.values;
     const warnings: string[] = [];
     const applied = new Map<string, ExtractionReviewItem>();
+    const decisions = new Map<string, ExtractionDecisionItem>();
     const addApplied = (key: string, label: string, value: unknown, target: string) => {
       const text = typeof value === "string" ? value.trim() : String(value ?? "").trim();
       if (text) applied.set(key, { key, label, value: text, target });
     };
+    const addDecision = (key: string, label: string, value: unknown, target?: string) => {
+      const text = typeof value === "string" ? value.trim() : String(value ?? "").trim();
+      if (text) decisions.set(key, { key, label, value: text, target });
+    };
+    const decisionTargets: Record<string, string> = {
+      "school-id-source": "school-id-input",
+      "contact-name-source": "beneficiary-contact-section",
+      "coordinate-source": "site-location-section",
+      "address-cleaned": "contractor-address-input",
+    };
+    for (const decision of extraction.decisions ?? []) addDecision(decision.key, decision.label, decision.value, decisionTargets[decision.key]);
     let filled = 0;
     let directory: SchoolDirectoryEntry | null = null;
     try { directory = await findSchoolDirectoryEntry({ schoolId: values.schoolId, schoolName: values.siteName }); }
@@ -1394,6 +1423,7 @@ function InstallationForm({
     let resolvedLocation: Partial<Installation> | undefined;
     const { resolveLocation } = await import("@/lib/locations");
     if (directory) {
+      addDecision("directory-match", "Directory matched", `${directory.schoolId || values.schoolId} ${directory.schoolName}`.trim(), "school-id-input");
       if (directory.regionCode && directory.provinceCode && directory.municipalityCode) resolvedLocation = directory;
       else {
         const resolution = resolveLocation({ islandGroup: directory.islandGroup, region: directory.region, province: directory.province, municipality: directory.municipality, barangay: directory.barangay });
@@ -1409,7 +1439,7 @@ function InstallationForm({
       setContractorNeedsReview(true);
       setContractorReviewMessage("Auto-fill found a contractor that is not in settings. Add it or pick an existing contractor.");
       setContractorError("");
-      warnings.push(`Contractor â€œ${values.contractor}â€ is not in Settings. Review the prefilled Add contractor form.`);
+      warnings.push(`Contractor Ã¢â‚¬Å“${values.contractor}Ã¢â‚¬Â is not in Settings. Review the prefilled Add contractor form.`);
     }
     if (!values.contractor) {
       setNewContractorName("");
@@ -1421,6 +1451,8 @@ function InstallationForm({
     } else if (contractor) {
       setContractorNeedsReview(false);
       setContractorReviewMessage("");
+      if (normalizeContractorText(values.contractor) !== normalizeContractorText(contractor.name)) addDecision("contractor-normalized", "Contractor normalized", `${values.contractor} -> ${contractor.name}`, "contractor-input");
+      else addDecision("contractor-selected", "Contractor selected", contractor.name, "contractor-input");
     }
     const hasSatelliteEquipment = Boolean(values.starlinkKitNumber || values.ap1IndoorSerial || values.ap2IndoorSerial || values.ap3OutdoorSerial);
     const solution = hasSatelliteEquipment ? refs.unitTypes.find((item) => item.active && /starlink|satellite/i.test(item.name)) : undefined;
@@ -1544,7 +1576,7 @@ function InstallationForm({
     });
     setExtractionHighlights([...highlighted]);
     window.setTimeout(() => setExtractionHighlights((current) => current.some((key) => highlighted.has(key)) ? [] : current), 5000);
-    window.setTimeout(() => setExtractionSummary({ filled, missing: extraction.missing.length, warnings: [...new Set(warnings)], diagnostics: extraction.diagnostics, source, applied: [...applied.values()] }), 0);
+    window.setTimeout(() => setExtractionSummary({ filled, missing: extraction.missing.length, warnings: [...new Set(warnings)], diagnostics: extraction.diagnostics, source, applied: [...applied.values()], decisions: [...decisions.values()] }), 0);
     setPastePanelOpen(false);
     setSchoolLookupNotice(directory ? "Matched the school directory and applied its canonical school and PSGC location data." : "Report values were extracted. Review the highlighted summary before saving.");
   }
@@ -1574,6 +1606,13 @@ function InstallationForm({
     else if (event.key === "ArrowUp") { event.preventDefault(); setSchoolIdLookupIndex((index) => (index - 1 + schoolIdMatches.length) % schoolIdMatches.length); }
     else if (event.key === "Enter") { event.preventDefault(); void selectDirectorySchool(schoolIdMatches[schoolIdLookupIndex]); }
     else if (event.key === "Escape") setSchoolIdLookupOpen(false);
+  }
+  function siteCodeLookupKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (!siteCodeLookupOpen || !siteCodeMatches.length) return;
+    if (event.key === "ArrowDown") { event.preventDefault(); setSiteCodeLookupIndex((index) => (index + 1) % siteCodeMatches.length); }
+    else if (event.key === "ArrowUp") { event.preventDefault(); setSiteCodeLookupIndex((index) => (index - 1 + siteCodeMatches.length) % siteCodeMatches.length); }
+    else if (event.key === "Enter") { event.preventDefault(); void selectDirectorySchool(siteCodeMatches[siteCodeLookupIndex]); }
+    else if (event.key === "Escape") setSiteCodeLookupOpen(false);
   }
 
   useEffect(() => {
@@ -1922,16 +1961,16 @@ function InstallationForm({
       </div>
       {!initial && !readOnly && <section className="section paste-report-panel" aria-labelledby="paste-report-title">
         <button type="button" className="paste-report-disclosure" aria-expanded={pastePanelOpen} onClick={() => setPastePanelOpen((open) => !open)}>
-          <span className="paste-report-icon"><ClipboardPaste size={18} /></span><span><strong id="paste-report-title">Paste activation report</strong><small>{extractionSummary ? `${extractionSummary.filled} values filled Â· ${extractionSummary.missing} missing Â· ${extractionSummary.warnings.length} warnings` : "Extract school, location, equipment, and contact details"}</small></span><ChevronDown size={17} className={pastePanelOpen ? "open" : ""} />
+          <span className="paste-report-icon"><ClipboardPaste size={18} /></span><span><strong id="paste-report-title">Paste activation report</strong><small>{extractionSummary ? `${extractionSummary.filled} values filled Ã‚Â· ${extractionSummary.missing} missing Ã‚Â· ${extractionSummary.warnings.length} warnings` : "Extract school, location, equipment, and contact details"}</small></span><ChevronDown size={17} className={pastePanelOpen ? "open" : ""} />
         </button>
         {pastePanelOpen && <div className="paste-report-body"><label>Activation report<textarea className="textarea paste-report-textarea" rows={10} maxLength={50000} value={pasteReport} onChange={(event) => setPasteReport(event.target.value)} placeholder="Paste the contractor activation message here" /></label><div className="paste-report-actions"><span className="small muted">{pasteReport.length.toLocaleString()} / 50,000 characters</span><div className="toolbar"><button type="button" className="button" disabled={Boolean(extractingReport) || !pasteReport.trim()} onClick={() => void extractReport("gemini")}>{extractingReport === "gemini" ? "Checking..." : "Check with Gemini"}</button><button type="button" className="button primary" disabled={Boolean(extractingReport) || !pasteReport.trim()} onClick={() => void extractReport("local")}><ClipboardPaste size={15} />{extractingReport === "local" ? "Extracting..." : "Extract and fill"}</button></div></div>{extractionError && <div className="notice validation-notice inline" role="alert">{extractionError}</div>}</div>}
-        {!pastePanelOpen && extractionSummary && <div className="paste-report-summary" role="status" aria-live="polite"><button type="button" className="button" onClick={() => setPastePanelOpen(true)}>Reopen report</button>{extractionSummary.applied.length > 0 && <div className="extraction-review" aria-label="Fields filled from activation report"><div className="extraction-review-head"><ClipboardList size={15} /><strong>Review filled fields</strong></div><div className="extraction-review-list">{extractionSummary.applied.map((item) => <button type="button" className="extraction-review-item" key={item.key} onClick={() => focusExtractionTarget(item.target)}><span>{item.label}</span><strong>{item.value}</strong></button>)}</div></div>}{extractionSummary.warnings.length > 0 && <ul aria-label="Activation report warnings">{extractionSummary.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}{extractionSummary.diagnostics.length > 0 && <div className="small muted paste-report-diagnostics">{extractionSummary.diagnostics.join(" ")}</div>}</div>}
+        {!pastePanelOpen && extractionSummary && <div className="paste-report-summary" role="status" aria-live="polite"><button type="button" className="button" onClick={() => setPastePanelOpen(true)}>Reopen report</button>{extractionSummary.applied.length > 0 && <div className="extraction-review" aria-label="Fields filled from activation report"><div className="extraction-review-head"><ClipboardList size={15} /><strong>Review filled fields</strong></div><div className="extraction-review-list">{extractionSummary.applied.map((item) => <button type="button" className="extraction-review-item" key={item.key} onClick={() => focusExtractionTarget(item.target)}><span>{item.label}</span><strong>{item.value}</strong></button>)}</div></div>}{extractionSummary.decisions.length > 0 && <div className="extraction-review extraction-decision-strip" aria-label="How extracted values were chosen"><div className="extraction-review-head"><CheckCircle2 size={15} /><strong>How values were chosen</strong></div><div className="extraction-review-list">{extractionSummary.decisions.map((item) => item.target ? <button type="button" className="extraction-review-item extraction-decision-item" key={item.key} onClick={() => focusExtractionTarget(item.target!)}><span>{item.label}</span><strong>{item.value}</strong></button> : <span className="extraction-review-item extraction-decision-item" key={item.key}><span>{item.label}</span><strong>{item.value}</strong></span>)}</div></div>}{extractionSummary.warnings.length > 0 && <ul aria-label="Activation report warnings">{extractionSummary.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}{extractionSummary.diagnostics.length > 0 && <div className="small muted paste-report-diagnostics">{extractionSummary.diagnostics.join(" ")}</div>}</div>}
       </section>}
       {initial && <section className="section ownership-grid" aria-label="Saved record metadata"><div><span className="small muted">Created by</span><strong>{record.createdBy}</strong></div><div><span className="small muted">Created</span><strong>{niceDateTime(record.createdAt)}</strong></div><div><span className="small muted">Updated by</span><strong>{record.updatedBy}</strong></div><div><span className="small muted">Last saved</span><strong>{niceDateTime(record.updatedAt)}</strong></div></section>}
       <section id="site-details-section" className="section site-details-polish site-details-guided"><div className="section-title"><div><h2>Site details</h2><span className="small muted">Identity, ownership, and current installation state</span></div><div className="toolbar section-copy-actions" aria-label="Copy site details"><button type="button" className={`button ${projectCopied ? "copied" : ""}`} disabled={saving || deleting || !record.id.trim() || !record.siteName.trim()} onClick={() => void copyProjectName()} title="Copy ELRN project name">{projectCopied ? <CheckCircle2 size={15} /> : <ClipboardCopy size={15} />}{projectCopyLabel}</button><button type="button" className={`button ${excelSiteCopied ? "copied" : ""}`} disabled={saving || deleting} onClick={() => void copyForExcel("first")} title="Copy BEIS School ID, Site Name, and Site Complete Address">{excelSiteCopied ? <CheckCircle2 size={15} /> : <ClipboardCopy size={15} />}{excelSiteCopyLabel}</button><button type="button" className={`button ${excelActivationCopied ? "copied" : ""}`} disabled={saving || deleting} onClick={() => void copyForExcel("last")} title="Copy activation columns">{excelActivationCopied ? <CheckCircle2 size={15} /> : <ClipboardCopy size={15} />}{excelActivationCopyLabel}</button></div></div><div className="grid-3">
-        <label className="school-lookup">Site name<input id="site-name-input" required className={`field${extractionHighlight("siteName")}`} role="combobox" aria-autocomplete="list" aria-expanded={schoolLookupOpen && schoolMatches.length > 0} aria-controls="school-directory-results" aria-invalid={Boolean((triedSubmit && missingSiteName) || invalidDirectoryIdentity) || undefined} aria-describedby={siteNameDescriptions} value={record.siteName} onFocus={() => setSchoolLookupOpen(true)} onBlur={() => window.setTimeout(() => setSchoolLookupOpen(false), 120)} onKeyDown={schoolLookupKeyDown} onChange={(e) => { patch({ siteName: e.target.value }); setSchoolLookupOpen(true); setSchoolLookupNotice(""); setDirectoryValidationError(""); setMatchedDirectorySchoolId(""); setMatchedDirectorySiteCode(""); }} placeholder="Search or enter a school name" />{schoolLookupOpen && record.siteName.trim().length >= 2 && schoolMatches.length > 0 && <div className="school-lookup-results" id="school-directory-results" role="listbox">{schoolMatches.map((entry, index) => <button type="button" className={`school-lookup-option ${index === schoolLookupIndex ? "active" : ""}`} role="option" aria-selected={index === schoolLookupIndex} key={entry.id} onMouseDown={(event) => event.preventDefault()} onClick={() => selectDirectorySchool(entry)}><span className="school-lookup-name">{entry.schoolName}</span><span className="school-lookup-province">{entry.province || "Province unavailable"}</span></button>)}</div>}</label>
-        <label className="school-lookup">School ID<span className="verified-field-wrap"><input id="school-id-input" required className={`field${extractionHighlight("id")}`} role="combobox" aria-autocomplete="list" aria-expanded={schoolIdLookupOpen && schoolIdMatches.length > 0} aria-controls="school-id-directory-results" aria-invalid={Boolean((triedSubmit && !schoolId) || duplicateSchoolId || invalidDirectoryIdentity) || undefined} aria-describedby={schoolIdDescriptions} value={record.id} onFocus={() => setSchoolIdLookupOpen(true)} onBlur={() => window.setTimeout(() => setSchoolIdLookupOpen(false), 120)} onKeyDown={schoolIdLookupKeyDown} onChange={(e) => { patch({ id: e.target.value }); setSchoolIdLookupOpen(true); setSchoolLookupNotice(""); setDirectoryValidationError(""); setMatchedDirectorySchoolId(""); setMatchedDirectorySiteCode(""); }} placeholder="Search or enter School ID" />{matchedDirectorySchoolId === record.id.trim() && <CheckCircle2 className="field-check-icon" size={16} aria-label="School ID found in directory" />}</span>{schoolIdLookupOpen && record.id.trim().length >= 2 && schoolIdMatches.length > 0 && <div className="school-lookup-results" id="school-id-directory-results" role="listbox">{schoolIdMatches.map((entry, index) => <button type="button" className={`school-lookup-option ${index === schoolIdLookupIndex ? "active" : ""}`} role="option" aria-selected={index === schoolIdLookupIndex} key={entry.id} onMouseDown={(event) => event.preventDefault()} onClick={() => selectDirectorySchool(entry)}><span className="school-lookup-name">{entry.schoolId || "No School ID"}</span><span className="school-lookup-province">{entry.schoolName}</span></button>)}</div>}</label>
-        <label>Site Code<input id="site-code-input" className="field" value={currentSiteCode} placeholder="Autofills from School ID" readOnly /></label>
+        <label className="school-lookup">Site name<input id="site-name-input" required className={`field${extractionHighlight("siteName")}`} role="combobox" aria-autocomplete="list" aria-expanded={schoolLookupOpen && schoolMatches.length > 0} aria-controls="school-directory-results" aria-invalid={Boolean((triedSubmit && missingSiteName) || invalidDirectoryIdentity) || undefined} aria-describedby={siteNameDescriptions} value={record.siteName} onFocus={() => setSchoolLookupOpen(true)} onBlur={() => window.setTimeout(() => setSchoolLookupOpen(false), 120)} onKeyDown={schoolLookupKeyDown} onChange={(e) => { patch({ siteName: e.target.value }); setSchoolLookupOpen(true); setSchoolLookupNotice(""); setDirectoryValidationError(""); setMatchedDirectorySchoolId(""); setMatchedDirectorySiteCode(""); setSiteCodeQuery(""); }} placeholder="Search or enter a school name" />{schoolLookupOpen && record.siteName.trim().length >= 2 && schoolMatches.length > 0 && <div className="school-lookup-results" id="school-directory-results" role="listbox">{schoolMatches.map((entry, index) => <button type="button" className={`school-lookup-option ${index === schoolLookupIndex ? "active" : ""}`} role="option" aria-selected={index === schoolLookupIndex} key={entry.id} onMouseDown={(event) => event.preventDefault()} onClick={() => selectDirectorySchool(entry)}><span className="school-lookup-name">{entry.schoolName}</span><span className="school-lookup-province">{entry.province || "Province unavailable"}</span></button>)}</div>}</label>
+        <label className="school-lookup">School ID<span className="verified-field-wrap"><input id="school-id-input" required className={`field${extractionHighlight("id")}`} role="combobox" aria-autocomplete="list" aria-expanded={schoolIdLookupOpen && schoolIdMatches.length > 0} aria-controls="school-id-directory-results" aria-invalid={Boolean((triedSubmit && !schoolId) || duplicateSchoolId || invalidDirectoryIdentity) || undefined} aria-describedby={schoolIdDescriptions} value={record.id} onFocus={() => setSchoolIdLookupOpen(true)} onBlur={() => window.setTimeout(() => setSchoolIdLookupOpen(false), 120)} onKeyDown={schoolIdLookupKeyDown} onChange={(e) => { patch({ id: e.target.value }); setSchoolIdLookupOpen(true); setSchoolLookupNotice(""); setDirectoryValidationError(""); setMatchedDirectorySchoolId(""); setMatchedDirectorySiteCode(""); setSiteCodeQuery(""); }} placeholder="Search or enter School ID" />{matchedDirectorySchoolId === record.id.trim() && <CheckCircle2 className="field-check-icon" size={16} aria-label="School ID found in directory" />}</span>{schoolIdLookupOpen && record.id.trim().length >= 2 && schoolIdMatches.length > 0 && <div className="school-lookup-results" id="school-id-directory-results" role="listbox">{schoolIdMatches.map((entry, index) => <button type="button" className={`school-lookup-option ${index === schoolIdLookupIndex ? "active" : ""}`} role="option" aria-selected={index === schoolIdLookupIndex} key={entry.id} onMouseDown={(event) => event.preventDefault()} onClick={() => selectDirectorySchool(entry)}><span className="school-lookup-name">{entry.schoolId || "No School ID"}</span><span className="school-lookup-province">{entry.schoolName}</span></button>)}</div>}</label>
+        <label className="school-lookup">Site Code<input id="site-code-input" className="field" role="combobox" aria-autocomplete="list" aria-expanded={siteCodeLookupOpen && siteCodeMatches.length > 0} aria-controls="site-code-directory-results" value={siteCodeLookupOpen || siteCodeQuery ? siteCodeQuery : currentSiteCode} onFocus={() => { setSiteCodeQuery(currentSiteCode); setSiteCodeLookupOpen(true); }} onBlur={() => window.setTimeout(() => setSiteCodeLookupOpen(false), 120)} onKeyDown={siteCodeLookupKeyDown} onChange={(e) => { setSiteCodeQuery(e.target.value); setSiteCodeLookupOpen(true); setSchoolLookupNotice(""); setDirectoryValidationError(""); }} placeholder="Search site code" />{siteCodeLookupOpen && siteCodeQuery.trim().length >= 2 && siteCodeMatches.length > 0 && <div className="school-lookup-results" id="site-code-directory-results" role="listbox">{siteCodeMatches.map((entry, index) => <button type="button" className={`school-lookup-option ${index === siteCodeLookupIndex ? "active" : ""}`} role="option" aria-selected={index === siteCodeLookupIndex} key={entry.id} onMouseDown={(event) => event.preventDefault()} onClick={() => selectDirectorySchool(entry)}><span className="school-lookup-name">{entry.siteCode || "No site code"}</span><span className="school-lookup-province">{[entry.schoolId, entry.schoolName].filter(Boolean).join(" | ")}</span></button>)}</div>}</label>
         <label>Solution<select id="solution-input" className={`select${extractionHighlight("unitType")}`} aria-invalid={Boolean(triedSubmit && missingUnitType) || undefined} aria-describedby={triedSubmit && missingUnitType ? "solution-required-error" : undefined} value={record.unitType} onChange={(e) => patch({ unitType: e.target.value })}>{activeOptions(refs.unitTypes, record.unitType).map((x) => <option key={x.id}>{x.name}</option>)}</select></label>
         <div className={`contractor-field ${contractorNeedsReview ? "needs-review" : ""}`}><label>Contractor<select id="contractor-input" className={`select${extractionHighlight("contractor")}${contractorNeedsReview ? " extraction-filled" : ""}`} aria-invalid={Boolean((triedSubmit && missingContractor) || contractorNeedsReview) || undefined} aria-describedby={[triedSubmit && missingContractor ? "contractor-required-error" : "", contractorNeedsReview ? "contractor-review-note" : ""].filter(Boolean).join(" ") || undefined} value={record.contractor} onChange={(e) => { if (e.target.value === addContractorOption) { setAddingContractor(true); setContractorNeedsReview(false); setContractorReviewMessage(""); setContractorError(""); return; } patch({ contractor: e.target.value }); setContractorNeedsReview(false); setContractorReviewMessage(""); }}><option value="">Choose contractor</option>{activeContractorOptions(refs.contractors, record.contractor).map((x) => <option key={x.id}>{x.name}</option>)}<option value={addContractorOption}>+ Add contractor</option></select></label>{contractorNeedsReview && !addingContractor && <div id="contractor-review-note" className="small contractor-review-note" role="status">{contractorReviewMessage}</div>}{addingContractor && <div className={`contractor-add-panel ${contractorNeedsReview ? "needs-review" : ""}`}><input className={`field${contractorNeedsReview ? " extraction-filled" : ""}`} value={newContractorName} onChange={(e) => setNewContractorName(e.target.value)} placeholder="New contractor name" disabled={contractorSaving} />{contractorNeedsReview && <div id="contractor-review-note" className="small contractor-review-note" role="status">{contractorReviewMessage}</div>}<div className="toolbar"><button type="button" className="button" disabled={contractorSaving} onClick={() => { setAddingContractor(false); setNewContractorName(""); setContractorNeedsReview(false); setContractorReviewMessage(""); setContractorError(""); }}>Cancel</button><button type="button" className="button primary" disabled={contractorSaving || !newContractorName.trim()} onClick={() => void submitNewContractor()}>{contractorSaving ? "Adding..." : "Add and select"}</button></div>{contractorError && <div className="small validation-copy">{contractorError}</div>}</div>}</div>
         <label>Installer / Team lead<input id="installer-team-lead-input" className={`field${extractionHighlight("installerTeamLead")}`} value={record.installerTeamLead} onChange={(e) => patch({ installerTeamLead: e.target.value })} placeholder="Installer or team lead name" /></label>
