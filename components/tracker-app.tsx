@@ -1340,7 +1340,15 @@ function InstallationForm({
     if (!siteCodeLookupOpen || siteCodeQuery.trim().length < 2) return;
     let active = true;
     const timer = window.setTimeout(() => {
-      void searchSchoolDirectory(siteCodeQuery).then((matches) => { if (active) { setSiteCodeMatches(matches); setSiteCodeLookupIndex(0); } }).catch(() => { if (active) setSiteCodeMatches([]); });
+      void Promise.all([
+        searchSchoolDirectory(siteCodeQuery),
+        findSchoolDirectoryEntry({ siteCode: siteCodeQuery }).catch(() => null),
+      ]).then(([matches, exact]) => {
+        if (!active) return;
+        const merged = exact ? [exact, ...matches.filter((match) => match.id !== exact.id)] : matches;
+        setSiteCodeMatches(merged);
+        setSiteCodeLookupIndex(0);
+      }).catch(() => { if (active) setSiteCodeMatches([]); });
     }, 250);
     return () => { active = false; window.clearTimeout(timer); };
   }, [siteCodeQuery, siteCodeLookupOpen]);
