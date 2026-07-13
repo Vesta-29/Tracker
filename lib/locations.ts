@@ -29,7 +29,7 @@ export type LocationSelection = {
   barangayCode: string;
 };
 export type LocationInput = Omit<Partial<LocationSelection>, "islandGroup"> & { islandGroup?: string };
-export type LocationResolution = { location?: LocationSelection; issue?: string };
+export type LocationResolution = { location?: LocationSelection; partialLocation?: Partial<LocationSelection>; issue?: string };
 
 const trimValues = <T extends Record<string, unknown>>(row: T) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, typeof value === "string" ? value.trim() : value])) as T;
 const regions: Region[] = rawRegions.map((row) => ({ ...trimValues(row), islandGroup: islandGroupByRegionCode[row.regCode] }));
@@ -107,6 +107,15 @@ export function getIslandGroup(regionCode: string) { return regionByCode.get(reg
 function selection(region: Region, province: Province, municipality: Muncity, barangay?: Barangay): LocationSelection {
   return { islandGroup: region.islandGroup, region: region.regionName, regionCode: region.psgcCode, province: province.provName, provinceCode: province.psgcCode, municipality: municipality.munCityName, municipalityCode: municipality.psgcCode, barangay: barangay?.brgyName ?? "", barangayCode: barangay?.psgcCode ?? "" };
 }
+function regionSelection(region: Region): Partial<LocationSelection> {
+  return { islandGroup: region.islandGroup, region: region.regionName, regionCode: region.psgcCode, province: "", provinceCode: "", municipality: "", municipalityCode: "", barangay: "", barangayCode: "" };
+}
+function provinceSelection(region: Region, province: Province): Partial<LocationSelection> {
+  return { ...regionSelection(region), province: province.provName, provinceCode: province.psgcCode };
+}
+function municipalitySelection(region: Region, province: Province, municipality: Muncity): Partial<LocationSelection> {
+  return { ...provinceSelection(region, province), municipality: municipality.munCityName, municipalityCode: municipality.psgcCode };
+}
 
 export function resolveLocation(input: LocationInput): LocationResolution {
   const hasCodes = Boolean(input.regionCode || input.provinceCode || input.municipalityCode || input.barangayCode);
@@ -121,13 +130,13 @@ export function resolveLocation(input: LocationInput): LocationResolution {
   const matchingRegions = regions.filter((region) => matchesRegion(region, input.region));
   if (!matchingRegions.length) return { issue: `Region not recognized: ${input.region}` };
   const matchingProvinces = matchingRegions.flatMap((region) => listProvinces(region.psgcCode).filter((province) => matchesName(province.provName, input.province)).map((province) => ({ region, province })));
-  if (!matchingProvinces.length) return { issue: `Province not recognized under ${input.region}: ${input.province}` };
+  if (!matchingProvinces.length) return { partialLocation: matchingRegions.length === 1 ? regionSelection(matchingRegions[0]) : undefined, issue: `Province not recognized under ${input.region}: ${input.province}` };
   const matchingMunicipalities = matchingProvinces.flatMap(({ region, province }) => listMuncities(province.psgcCode).filter((municipality) => matchesName(municipality.munCityName, input.municipality)).map((municipality) => ({ region, province, municipality })));
-  if (!matchingMunicipalities.length) return { issue: `Municipality not recognized under ${input.province}: ${input.municipality}` };
+  if (!matchingMunicipalities.length) return { partialLocation: matchingProvinces.length === 1 ? provinceSelection(matchingProvinces[0].region, matchingProvinces[0].province) : undefined, issue: `Municipality not recognized under ${input.province}: ${input.municipality}` };
   const candidates = matchingMunicipalities.flatMap(({ region, province, municipality }) => input.barangay
     ? listBarangays(municipality.psgcCode).filter((barangay) => matchesName(barangay.brgyName, input.barangay)).map((barangay) => selection(region, province, municipality, barangay))
     : [selection(region, province, municipality)]);
-  if (!candidates.length) return { issue: `Barangay not recognized under ${input.municipality}: ${input.barangay}` };
+  if (!candidates.length) return { partialLocation: matchingMunicipalities.length === 1 ? municipalitySelection(matchingMunicipalities[0].region, matchingMunicipalities[0].province, matchingMunicipalities[0].municipality) : undefined, issue: `Barangay not recognized under ${input.municipality}: ${input.barangay}` };
   return candidates.length === 1 ? { location: candidates[0] } : { issue: "Ambiguous name-only location path; add PSGC codes" };
 }
 

@@ -1372,6 +1372,7 @@ function InstallationForm({
       const { resolveLocation } = await import("@/lib/locations");
       const resolution = resolveLocation({ islandGroup: entry.islandGroup, region: entry.region, province: entry.province, municipality: entry.municipality, barangay: entry.barangay });
       if (resolution.location) { selected = { ...entry, ...resolution.location, warning: "" }; resolutionIssue = ""; }
+      else if (resolution.partialLocation) selected = { ...entry, ...resolution.partialLocation };
       else resolutionIssue = resolution.issue || entry.warning;
     }
     const next: Partial<Installation> = { siteName: selected.schoolName };
@@ -1379,11 +1380,12 @@ function InstallationForm({
     setMatchedDirectorySchoolId(selected.schoolId);
     setMatchedDirectorySiteCode(selected.siteCode);
     setDirectoryValidationError("");
+    const hasLocationMatch = Boolean(selected.regionCode || selected.provinceCode || selected.municipalityCode);
     const resolved = Boolean(selected.regionCode && selected.provinceCode && selected.municipalityCode);
-    if (resolved) {
+    if (hasLocationMatch) {
       const locationFields = ["islandGroup", "region", "regionCode", "province", "provinceCode", "municipality", "municipalityCode", "barangay", "barangayCode"] as const;
       for (const field of locationFields) (next as Record<string, unknown>)[field] = selected[field] ?? "";
-      setSchoolLookupNotice("School selected. School ID, site name, and location were updated.");
+      setSchoolLookupNotice(resolved ? "School selected. School ID, site name, and location were updated." : `School selected. Matched location fields were filled; complete the remaining location fields manually.${resolutionIssue ? ` ${resolutionIssue}` : ""}`);
     } else if (!resolved) setSchoolLookupNotice(`School selected, but its spreadsheet location could not be matched to PSGC data.${resolutionIssue ? ` ${resolutionIssue}` : ""}`);
     patch(next);
     setSiteCodeQuery(selected.siteCode);
@@ -1427,8 +1429,9 @@ function InstallationForm({
       if (directory.regionCode && directory.provinceCode && directory.municipalityCode) resolvedLocation = directory;
       else {
         const resolution = resolveLocation({ islandGroup: directory.islandGroup, region: directory.region, province: directory.province, municipality: directory.municipality, barangay: directory.barangay });
-        resolvedLocation = resolution.location;
+        resolvedLocation = resolution.location ?? resolution.partialLocation;
         if (!resolvedLocation) warnings.push(`The directory school was found, but its location was unresolved. ${resolution.issue ?? ""}`.trim());
+        else if (!resolution.location) warnings.push(`Matched available directory location fields. Complete the remaining location fields manually. ${resolution.issue ?? ""}`.trim());
       }
     } else if (values.schoolId || values.siteName) warnings.push("No unique school-directory match was found.");
 
@@ -2248,8 +2251,8 @@ function SchoolDirectorySettings({ notify }: { notify: (message: string) => void
         const schoolName = get(columns.schoolName); if (!schoolName) { skipped += 1; return; }
         const schoolId = get(columns.schoolId); const siteCode = get(columns.siteCode); const priority = get(columns.priority);
         const raw = { islandGroup: directoryIslandGroup(get(columns.islandGroup)), region: get(columns.region), province: get(columns.province), municipality: get(columns.municipality), barangay: get(columns.barangay) };
-        const resolution = resolveLocation(raw); const location = resolution.location;
-        const warnings = [!schoolId ? "Missing School ID" : "", !siteCode ? "Missing Site Code" : ""].filter(Boolean);
+        const resolution = resolveLocation(raw); const location = resolution.location ?? resolution.partialLocation;
+        const warnings = [!schoolId ? "Missing School ID" : "", !siteCode ? "Missing Site Code" : "", resolution.issue ? resolution.issue : ""].filter(Boolean);
         if (warnings.length) partial += 1; else complete += 1;
         entries.push({ id: uuid(), schoolId, siteCode, schoolName, islandGroup: location?.islandGroup || (islandGroups.some((group) => group === raw.islandGroup) ? raw.islandGroup as Installation["islandGroup"] : ""), region: location?.region || raw.region, regionCode: location?.regionCode || "", province: location?.province || raw.province, provinceCode: location?.provinceCode || "", municipality: location?.municipality || raw.municipality, municipalityCode: location?.municipalityCode || "", barangay: location?.barangay || raw.barangay, barangayCode: location?.barangayCode || "", priority, sourceRow: index + 2, warning: warnings.join("; ") });
       });

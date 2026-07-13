@@ -59,4 +59,22 @@ describe("resolveLocation", () => {
       barangay: "Anislag",
     });
   });
+
+  it("returns matched region and province when municipality is unresolved", () => {
+    const result = resolveLocation({
+      islandGroup: "Luzon",
+      region: "III",
+      province: "Zambales",
+      municipality: "Olongapo City",
+    });
+
+    expect(result.location).toBeUndefined();
+    expect(result.issue).toBe("Municipality not recognized under Zambales: Olongapo City");
+    expect(result.partialLocation).toMatchObject({
+      islandGroup: "Luzon",
+      region: "Region III (Central Luzon)",
+      province: "Zambales",
+      municipality: "",
+    });
+  });
 });
