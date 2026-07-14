@@ -397,6 +397,10 @@ function projectSiteCode(record: Installation) {
   const level = record.islandGroup === "Luzon" ? "L1" : record.islandGroup === "Visayas" ? "L2" : record.islandGroup === "Mindanao" ? "L3" : "L4";
   return projectSiteCodeLookup[schoolId] || `ELRN-${level}-${schoolId}`;
 }
+function directorySiteCode(record: Installation, directoryBySchoolId?: Map<string, SchoolDirectoryEntry>) {
+  const entry = directoryBySchoolId?.get(normalizeDirectoryText(record.id));
+  return entry?.siteCode.trim() || projectSiteCode(record);
+}
 const hiddenAuditFields = new Set(["id", "created_at", "updated_at", "created_by", "updated_by", "installation_id", "installation_component_id", "field_definition_id", "component_type_id", "visit_type_id", "actor_id", "import_batch_id"]);
 function auditTitle(value: string) { return value.replaceAll("_", " ").replace(/\b[a-z]/g, (letter) => letter.toUpperCase()); }
 function auditLabel(field: string) { return auditTitle(auditFieldLabels[field] ?? field); }
@@ -427,6 +431,7 @@ export default function TrackerApp() {
   const [records, setRecords] = useState<Installation[]>(initialWorkspace?.records ?? []);
   const [refs, setRefs] = useState<ReferenceData>(initialWorkspace?.refs ?? emptyReferences);
   const [savedRefs, setSavedRefs] = useState<ReferenceData>(initialWorkspace?.refs ?? emptyReferences);
+  const [schoolDirectoryEntries, setSchoolDirectoryEntries] = useState<SchoolDirectoryEntry[]>([]);
   const [editing, setEditing] = useState<Installation | undefined>();
   const [loadedRouteKey, setLoadedRouteKey] = useState(initialWorkspace ? routeKey : "");
   const [toast, setToast] = useState("");
@@ -440,6 +445,7 @@ export default function TrackerApp() {
   const filters = useMemo(() => sanitizeSiteFilter(siteFilterFromSearchParams(new URLSearchParams(siteFilterParams)), records, refs), [records, refs, siteFilterParams]);
   const pendingFiltersRef = useRef<Filter | undefined>(undefined);
   const siteRecord = editing ?? (loadedRouteKey === routeKey ? records.find((record) => record.id === siteDetailId) : undefined);
+  const directoryBySchoolId = useMemo(() => new Map(schoolDirectoryEntries.filter((entry) => entry.schoolId.trim()).map((entry) => [normalizeDirectoryText(entry.schoolId), entry])), [schoolDirectoryEntries]);
   useEffect(() => { document.title = documentTitle(pathname, siteRecord, siteDetailId); }, [pathname, siteDetailId, siteRecord]);
   const setPage = useCallback((next: Page) => {
     const query = next === "dashboard" || next === "installations" ? siteFilterQuery(pendingFiltersRef.current ?? filters) : "";
@@ -485,6 +491,12 @@ export default function TrackerApp() {
       .then((requiresPassword) => { if (requiresPassword) { setPasswordSetup(true); setLoading(false); } else void refresh(); })
       .catch((error) => { setLoadError(error instanceof Error ? error.message : "Unable to accept invitation."); setLoading(false); });
   }, [refresh]);
+  useEffect(() => {
+    if (!loggedIn || !siteRoute) return;
+    let active = true;
+    void loadSchoolDirectoryEntries().then((entries) => { if (active) setSchoolDirectoryEntries(entries); }).catch(() => { if (active) setSchoolDirectoryEntries([]); });
+    return () => { active = false; };
+  }, [loggedIn, siteRoute]);
   const saveReferences = useCallback(async () => {
     setReferenceSaveState("saving"); setReferenceSaveError("");
     try {
@@ -554,7 +566,7 @@ export default function TrackerApp() {
   }, [canEdit, hasUnsavedReferences, page, saveReferences, setPage]);
 
   const filtered = useMemo(() => newestCreatedFirst(records.filter((r) =>
-    (!filters.search || `${r.id} ${r.siteName} ${r.legacyKitNumber ?? ""} ${r.barangay} ${r.municipality} ${r.province} ${r.contractor}`.toLowerCase().includes(filters.search.toLowerCase())) &&
+    (!filters.search || `${r.id} ${r.siteName} ${directorySiteCode(r, directoryBySchoolId)} ${r.legacyKitNumber ?? ""} ${r.barangay} ${r.municipality} ${r.province} ${r.contractor}`.toLowerCase().includes(filters.search.toLowerCase())) &&
     (!filters.status || r.status === filters.status) &&
     (!filters.contractor || r.contractor === filters.contractor) &&
     (!filters.updatedBy || r.updatedBy === filters.updatedBy) &&
@@ -566,7 +578,7 @@ export default function TrackerApp() {
     (!filters.from || (r.activationDate ?? "") >= filters.from) &&
     (!filters.to || (r.activationDate ?? "") <= filters.to) &&
     (!filters.attention || (filters.attention === "missingName" ? !r.siteName : Boolean(r.legacyKitNumber)))
-  )), [records, filters]);
+  )), [directoryBySchoolId, records, filters]);
 
   async function save(record: Installation, dest: Page = "installations", href = "") {
     try {
@@ -612,8 +624,8 @@ export default function TrackerApp() {
   return (
     <>
           {refreshing && <div className="route-refresh-overlay" role="status" aria-live="polite" aria-atomic="true"><div className="route-refresh-card"><span className="route-refresh-dot" /><div><strong>Updating page data</strong><small>Keeping the latest changes in sync.</small></div></div></div>}
-          {page === "dashboard" && <Dashboard records={filtered} allRecords={records} refs={refs} filters={filters} setFilters={setFilters} setPage={setPage} canEdit={canEdit} />}
-          {page === "installations" && <Installations records={filtered} allRecords={records} refs={refs} filters={filters} setFilters={setFilters} startEdit={startEdit} setPage={setPage} canEdit={canEdit} onBulkUpdate={async (ids, changes) => { try { await bulkUpdateInstallations(ids, changes); await refresh({ invalidate: true }); notify("Selected sites updated."); } catch (error) { notify(error instanceof Error ? error.message : "Unable to update selected sites."); throw error; } }} onDelete={deleteSite} />}
+          {page === "dashboard" && <Dashboard records={filtered} allRecords={records} refs={refs} filters={filters} setFilters={setFilters} setPage={setPage} canEdit={canEdit} directoryBySchoolId={directoryBySchoolId} />}
+          {page === "installations" && <Installations records={filtered} allRecords={records} refs={refs} filters={filters} setFilters={setFilters} startEdit={startEdit} setPage={setPage} canEdit={canEdit} onBulkUpdate={async (ids, changes) => { try { await bulkUpdateInstallations(ids, changes); await refresh({ invalidate: true }); notify("Selected sites updated."); } catch (error) { notify(error instanceof Error ? error.message : "Unable to update selected sites."); throw error; } }} onDelete={deleteSite} directoryBySchoolId={directoryBySchoolId} />}
           {page === "serviceVisits" && <ServiceVisitsPage records={records} refs={refs} actorName={profile?.fullName || profile?.email || "Current user"} onSave={saveServiceVisit} canEdit={canEdit} routeReady={loadedRouteKey === routeKey} />}
           {page === "new" && siteDetailId && !siteRecord && <div className="panel section muted">Loading site record...</div>}
           {page === "new" && (!siteDetailId || siteRecord) && (
@@ -883,7 +895,7 @@ function FilterBar({ records, refs, filters, setFilters, compact = false, matchi
   </div>;
 }
 
-function Dashboard({ records, allRecords, refs, filters, setFilters, setPage, canEdit }: { records: Installation[]; allRecords: Installation[]; refs: ReferenceData; filters: Filter; setFilters: (f: Filter) => void; setPage: (p: Page) => void; canEdit: boolean }) {
+function Dashboard({ records, allRecords, refs, filters, setFilters, setPage, canEdit, directoryBySchoolId }: { records: Installation[]; allRecords: Installation[]; refs: ReferenceData; filters: Filter; setFilters: (f: Filter) => void; setPage: (p: Page) => void; canEdit: boolean; directoryBySchoolId?: Map<string, SchoolDirectoryEntry> }) {
   const [showAllContractors, setShowAllContractors] = useState(false);
   const counts = siteStatusOptions(refs, filters.status as Status).map((status) => ({ status: status.value, label: status.name, count: records.filter((r) => r.status === status.value).length }));
   const contractors = activeContractorOptions(refs.contractors).map(({ name }) => ({ name, count: records.filter((r) => r.contractor === name).length })).filter(({ count }) => count > 0).sort((a,b) => b.count-a.count || a.name.localeCompare(b.name));
@@ -894,7 +906,7 @@ function Dashboard({ records, allRecords, refs, filters, setFilters, setPage, ca
     <div className="stats status-stats" style={{ "--status-count": String(Math.max(counts.length, 1)) } as React.CSSProperties}>{counts.map(({ status, label, count }) => <button type="button" className="stat stat-button" key={status} onClick={() => { setFilters({ ...filters, status }); setPage("installations"); }}><span className="small muted">{label}</span><span className="stat-value">{count}<span className="status-dot" aria-hidden="true" style={{ background: siteStatusColor(status, refs) }} /></span></button>)}</div>
     <div style={{ marginBottom: 16 }}><FilterBar records={allRecords} refs={refs} filters={filters} setFilters={setFilters} compact matchingCount={records.length} promoteUpdatedDate /></div>
     <div className="two-pane">
-      <div className="panel"><div className="panel-head"><div><h2>Latest installations</h2><div className="small muted">{records.length} matching records</div></div><button className="button ghost" onClick={() => setPage("installations")}>View all sites</button></div><RecordsTable records={records.slice(0, 6)} /></div>
+      <div className="panel"><div className="panel-head"><div><h2>Latest installations</h2><div className="small muted">{records.length} matching records</div></div><button className="button ghost" onClick={() => setPage("installations")}>View all sites</button></div><RecordsTable records={records.slice(0, 6)} directoryBySchoolId={directoryBySchoolId} /></div>
       <div className="panel"><div className="panel-head"><div><h2>By contractor</h2><div className="small muted">Current filtered distribution</div></div><BarChart3 size={18} className="muted" /></div>{contractors.length ? <div className="section contractor-distribution">{visibleContractors.map((c) => <div className="bar-row" key={c.name}><span className="small contractor-name" title={c.name}>{c.name}</span><span className="bar"><span style={{ width: `${(c.count/max)*100}%` }} /></span><strong>{c.count}</strong></div>)}{contractors.length > 5 && <button type="button" className="button ghost contractor-expand" onClick={() => setShowAllContractors((show) => !show)}>{showAllContractors ? "Show top contractors" : `Show all ${contractors.length} contractors`}</button>}</div> : <div className="empty contractor-empty"><BarChart3 size={22} /><p><strong>No contractor activity matches these filters.</strong></p><span>Adjust the filters to view the distribution.</span></div>}</div>
     </div>
     <div className="attention-list">
@@ -905,12 +917,12 @@ function Dashboard({ records, allRecords, refs, filters, setFilters, setPage, ca
   </>;
 }
 
-function Installations({ records, allRecords, refs, filters, setFilters, startEdit, setPage, canEdit, onBulkUpdate, onDelete }: { records: Installation[]; allRecords: Installation[]; refs: ReferenceData; filters: Filter; setFilters: (f: Filter) => void; startEdit: (r: Installation) => void; setPage: (p: Page) => void; canEdit: boolean; onBulkUpdate: (ids: string[], changes: { status?: Status; contractor?: string }) => Promise<void>; onDelete: (record: Installation) => Promise<void> }) {
+function Installations({ records, allRecords, refs, filters, setFilters, startEdit, setPage, canEdit, onBulkUpdate, onDelete, directoryBySchoolId }: { records: Installation[]; allRecords: Installation[]; refs: ReferenceData; filters: Filter; setFilters: (f: Filter) => void; startEdit: (r: Installation) => void; setPage: (p: Page) => void; canEdit: boolean; onBulkUpdate: (ids: string[], changes: { status?: Status; contractor?: string }) => Promise<void>; onDelete: (record: Installation) => Promise<void>; directoryBySchoolId?: Map<string, SchoolDirectoryEntry> }) {
   return <>
     <div className="page-head"><div><p className="eyebrow">Registry</p><h1>Sites</h1><p className="muted">Find a site record and review its deployed equipment.</p></div><div className="toolbar"><button className="button" onClick={() => downloadCsv(records, refs)}><Download size={16} />Export CSV</button><button className="button" onClick={async () => downloadXlsx(await loadInstallationValidationRecords(), refs)}><FileSpreadsheet size={16} />Export XLSX</button>{canEdit && <button className="button primary" onClick={() => setPage("new")}><Plus size={16} />Add site</button>}</div></div>
     <div className="shortcut-hint small muted">Shortcuts: Ctrl+K search, Alt+N new site.</div>
     <div style={{ marginBottom: 16 }}><FilterBar records={allRecords} refs={refs} filters={filters} setFilters={setFilters} compact matchingCount={records.length} promoteUpdatedDate /></div>
-    <div className="panel"><div className="panel-head"><strong>{records.length} records</strong></div><RecordsTable records={records} refs={refs} filters={filters} onClearFilters={() => setFilters(emptyFilter)} onSelect={startEdit} detailed canEdit={canEdit} onBulkUpdate={onBulkUpdate} onDelete={onDelete} /></div>
+    <div className="panel"><div className="panel-head"><strong>{records.length} records</strong></div><RecordsTable records={records} refs={refs} filters={filters} onClearFilters={() => setFilters(emptyFilter)} onSelect={startEdit} detailed canEdit={canEdit} onBulkUpdate={onBulkUpdate} onDelete={onDelete} directoryBySchoolId={directoryBySchoolId} /></div>
   </>;
 }
 
@@ -951,7 +963,7 @@ function PaginationControl({ currentPage, pageCount, pageSize, total, itemLabel,
     </div>
   </div>;
 }
-function RecordsTable({ records, refs, filters, onClearFilters, onSelect, detailed = false, canEdit = true, onBulkUpdate, onDelete }: { records: Installation[]; refs?: ReferenceData; filters?: Filter; onClearFilters?: () => void; onSelect?: (r: Installation) => void; detailed?: boolean; canEdit?: boolean; onBulkUpdate?: (ids: string[], changes: { status?: Status; contractor?: string }) => Promise<void>; onDelete?: (record: Installation) => Promise<void> }) {
+function RecordsTable({ records, refs, filters, onClearFilters, onSelect, detailed = false, canEdit = true, onBulkUpdate, onDelete, directoryBySchoolId }: { records: Installation[]; refs?: ReferenceData; filters?: Filter; onClearFilters?: () => void; onSelect?: (r: Installation) => void; detailed?: boolean; canEdit?: boolean; onBulkUpdate?: (ids: string[], changes: { status?: Status; contractor?: string }) => Promise<void>; onDelete?: (record: Installation) => Promise<void>; directoryBySchoolId?: Map<string, SchoolDirectoryEntry> }) {
   const [sort, setSort] = useState<{ key: SiteSortKey; direction: "asc" | "desc" }>({ key: "createdAt", direction: "desc" });
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -965,7 +977,7 @@ function RecordsTable({ records, refs, filters, onClearFilters, onSelect, detail
   const sortable = detailed;
   const sortedRecords = useMemo(() => {
     if (!sort) return newestCreatedFirst(records);
-    const read = (record: Installation) => sort.key === "location" ? `${record.region} ${record.province}` : sort.key === "equipment" ? record.components.length : sort.key === "siteCode" ? projectSiteCode(record) : record[sort.key];
+    const read = (record: Installation) => sort.key === "location" ? `${record.region} ${record.province}` : sort.key === "equipment" ? record.components.length : sort.key === "siteCode" ? directorySiteCode(record, directoryBySchoolId) : record[sort.key];
     return records.map((record, index) => ({ record, index })).sort((a, b) => {
       const left = read(a.record);
       const right = read(b.record);
@@ -976,7 +988,7 @@ function RecordsTable({ records, refs, filters, onClearFilters, onSelect, detail
           : String(left ?? "").localeCompare(String(right ?? ""), undefined, { numeric: true, sensitivity: "base" });
       return (sort.direction === "asc" ? compared : -compared) || a.index - b.index;
     }).map(({ record }) => record);
-  }, [records, sort]);
+  }, [directoryBySchoolId, records, sort]);
   const pageCount = Math.max(1, Math.ceil(sortedRecords.length / pageSize));
   const currentPage = Math.min(page, pageCount);
   const visibleRecords = detailed ? sortedRecords.slice((currentPage - 1) * pageSize, currentPage * pageSize) : sortedRecords;
@@ -1051,7 +1063,7 @@ function RecordsTable({ records, refs, filters, onClearFilters, onSelect, detail
           {selectable && <td className="site-select-column" onClick={(event) => event.stopPropagation()}><input type="checkbox" aria-label={`Select ${r.siteName || r.id}`} checked={validSelectedIds.includes(r.id)} onChange={(event) => { setBulkReview(false); setSelectedIds((current) => event.target.checked ? [...current, r.id] : current.filter((id) => id !== r.id)); }} /></td>}
           <td className="site-identity-column" title={r.siteName || undefined}>{r.siteName ? <span className="site-name-cell">{r.siteName}</span> : <span className="pill issue">Site name required</span>}</td>
           <td className="site-id-column"><strong>{r.id}</strong></td>
-          {detailed && <td className="site-code-column">{projectSiteCode(r)}</td>}
+          {detailed && <td className="site-code-column">{directorySiteCode(r, directoryBySchoolId)}</td>}
           <td className="site-location-column">{detailed ? tableLocationLabel(r) : locationLabel(r)}</td>
           <td className="install-date-column">{niceDateTime(r.createdAt)}</td>
           <td className="site-status-column"><StatusPill status={r.status} refs={refs} /></td>

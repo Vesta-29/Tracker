@@ -189,6 +189,13 @@ Teacher II
     });
   });
 
+  it("ignores serial-number markers inside extracted equipment values", () => {
+    expect(parseSiteActivationReport(`Starlink kit number:
+S/N: KIT4P00051629JR9`).values.starlinkKitNumber).toBe("KIT4P00051629JR9");
+    expect(parseSiteActivationReport("Router:\nS/N, H1V10XN001454").values.ruijieRouterSerial).toBe("H1V10XN001454");
+    expect(parseSiteActivationReport("AP 1 Indoor:\nSerial No. G1UC2LK011689").values.ap1IndoorSerial).toBe("G1UC2LK011689");
+  });
+
   it("accepts coordinates on one line or separated by commas", () => {
     expect(parseSiteActivationReport("Coordinates: 11.368908, 122.75106").values).toMatchObject({
       latitude: "11.368908",

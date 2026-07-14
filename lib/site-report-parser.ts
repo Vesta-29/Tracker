@@ -57,7 +57,7 @@ const schoolIdAliases = ["School ID"];
 const siteCodeAliases = ["Site Code"];
 
 const clean = (value: unknown) => typeof value === "string" ? value.replace(/[\t\r\n]+/g, " ").replace(/\s+/g, " ").trim() : "";
-const cleanSerial = (value: unknown) => typeof value === "string" ? value.replace(/[\t\r\n]+/g, " ").trim() : "";
+const cleanSerial = (value: unknown) => typeof value === "string" ? value.replace(/[\t\r\n]+/g, " ").replace(/^\s*(?:s\s*\/?\s*n|sn|serial(?:\s*(?:no|number))?)\s*[:,;.-]?\s*/i, "").trim() : "";
 const normalizeLabel = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 const labelMatches = (label: string, candidates: readonly string[]) => {
   const normalized = normalizeLabel(label);
