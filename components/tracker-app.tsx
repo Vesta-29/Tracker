@@ -354,6 +354,7 @@ function equipmentFieldTypeLabel(type: ComponentFieldType) { return ({ text: "Te
 function componentType(refs: ReferenceData, type: string) { return refs.componentTypes.find((option) => option.name === type); }
 function libraryField(refs: ReferenceData, attachment: ComponentFieldAttachment) { return (refs.equipmentFields ?? []).find((field) => field.id === attachment.libraryFieldId); }
 function locationLabel(record: Pick<Installation, "barangay" | "municipality">) { return [record.barangay, record.municipality].filter(Boolean).join(", ") || "Location pending"; }
+function tableLocationLabel(record: Pick<Installation, "region" | "province">) { return [record.region, record.province].filter(Boolean).join(", ") || "Location pending"; }
 function contactDraft(): BeneficiaryContact { return { id: crypto.randomUUID(), name: "", role: "", phone: "" }; }
 function contactHasValue(contact: BeneficiaryContact) { return Boolean(contact.name.trim() || contact.phone.trim()); }
 function beneficiaryContactList(record: Pick<Installation, "beneficiaryContacts" | "beneficiaryName" | "beneficiaryRole" | "beneficiaryPhone">) {
@@ -964,7 +965,7 @@ function RecordsTable({ records, refs, filters, onClearFilters, onSelect, detail
   const sortable = detailed;
   const sortedRecords = useMemo(() => {
     if (!sort) return newestCreatedFirst(records);
-    const read = (record: Installation) => sort.key === "location" ? `${record.barangay} ${record.municipality}` : sort.key === "equipment" ? record.components.length : sort.key === "siteCode" ? projectSiteCode(record) : record[sort.key];
+    const read = (record: Installation) => sort.key === "location" ? `${record.region} ${record.province}` : sort.key === "equipment" ? record.components.length : sort.key === "siteCode" ? projectSiteCode(record) : record[sort.key];
     return records.map((record, index) => ({ record, index })).sort((a, b) => {
       const left = read(a.record);
       const right = read(b.record);
@@ -1038,8 +1039,7 @@ function RecordsTable({ records, refs, filters, onClearFilters, onSelect, detail
           {selectable && <th className="site-select-column"><input type="checkbox" aria-label="Select visible site rows" checked={visibleSelected} onChange={(event) => toggleVisibleRows(event.target.checked)} /></th>}
           {sortHeader("Site name", "siteName", "site-identity-column")}
           {sortHeader("School ID", "id", "site-id-column")}
-          {detailed && sortHeader("Site Code", "siteCode", "site-code-column secondary-site-column")}
-          {detailed && sortHeader("Island group", "islandGroup", "island-column secondary-site-column")}
+          {detailed && sortHeader("Site Code", "siteCode", "site-code-column")}
           {sortHeader("Location", "location", "site-location-column")}
           {sortHeader("Created at", "createdAt", "install-date-column")}
           {sortHeader("Status", "status", "site-status-column")}
@@ -1051,9 +1051,8 @@ function RecordsTable({ records, refs, filters, onClearFilters, onSelect, detail
           {selectable && <td className="site-select-column" onClick={(event) => event.stopPropagation()}><input type="checkbox" aria-label={`Select ${r.siteName || r.id}`} checked={validSelectedIds.includes(r.id)} onChange={(event) => { setBulkReview(false); setSelectedIds((current) => event.target.checked ? [...current, r.id] : current.filter((id) => id !== r.id)); }} /></td>}
           <td className="site-identity-column" title={r.siteName || undefined}>{r.siteName ? <span className="site-name-cell">{r.siteName}</span> : <span className="pill issue">Site name required</span>}</td>
           <td className="site-id-column"><strong>{r.id}</strong></td>
-          {detailed && <td className="site-code-column secondary-site-column">{projectSiteCode(r)}</td>}
-          {detailed && <td className="island-column secondary-site-column">{r.islandGroup || "None"}</td>}
-          <td className="site-location-column">{locationLabel(r)}</td>
+          {detailed && <td className="site-code-column">{projectSiteCode(r)}</td>}
+          <td className="site-location-column">{detailed ? tableLocationLabel(r) : locationLabel(r)}</td>
           <td className="install-date-column">{niceDateTime(r.createdAt)}</td>
           <td className="site-status-column"><StatusPill status={r.status} refs={refs} /></td>
           {detailed && <td className="updated-by-column secondary-site-column">{r.updatedBy}</td>}
