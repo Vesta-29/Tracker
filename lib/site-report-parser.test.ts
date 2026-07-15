@@ -146,6 +146,13 @@ Active Contact Number: 09093351382`);
     expect(result.decisions).toContainEqual({ key: "contact-name-source", label: "Contact name source", value: "School Head/ICT Teacher contact" });
   });
 
+  it("ignores contact person role placeholders and uses the beneficiary name", () => {
+    const result = parseSiteActivationReport(`Beneficiary: Cristina D.  Punsalan
+Contact Person (School Head/ICT Teacher):  SCHOOL HEAD/PRIN  CIPAL`);
+    expect(result.values.beneficiaryName).toBe("Cristina D. Punsalan");
+    expect(result.decisions).toContainEqual({ key: "contact-name-source", label: "Contact name source", value: "Beneficiary label" });
+  });
+
   it("captures multiline remarks and tolerates missing optional fields", () => {
     const result = parseSiteActivationReport("School Name: Small ES\nRemarks: First line\nSecond line");
     expect(result.values.remarks).toBe("First line Second line");

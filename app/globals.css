@@ -676,6 +676,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .validation-summary li { padding-left: 1px; }
 .validation-summary a { color: inherit; font-weight: 700; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
 .field[aria-invalid="true"], .select[aria-invalid="true"], .textarea[aria-invalid="true"] { border-color: oklch(0.68 0.16 35); background: oklch(0.985 0.016 48); box-shadow: 0 0 0 3px oklch(0.82 0.09 52 / .18); }
+.field-error { display: block; margin-top: 4px; color: oklch(0.43 0.13 38); font-size: 12px; font-weight: 700; line-height: 1.35; }
+html[data-theme="dark"] .field-error { color: oklch(0.79 0.11 48); }
 .attention-list { display: grid; gap: 8px; margin-top: 18px; }
 .attention-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
 .attention-row .small { margin-top: 2px; }

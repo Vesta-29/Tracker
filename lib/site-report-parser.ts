@@ -213,20 +213,33 @@ function coordinateSections(text: string) {
   };
 }
 
+function isContactPlaceholder(value: string) {
+  const normalized = normalizeLabel(value);
+  const compact = normalized.replace(/\s+/g, "");
+  if (!compact) return true;
+  if (/^(?:na|n\/a|none|null|notapplicable|tbd|tba)$/.test(compact)) return true;
+  if (/^(?:schoolhead|principal|schoolheadprincipal|headteacher|teacher|icteacher|ictteacher|schoolictteacher|schoolheadictteacher)$/.test(compact)) return true;
+  const roleWords = new Set(["school", "head", "principal", "prin", "cipal", "ict", "teacher", "adviser", "coordinator", "focal", "person", "sir", "maam", "madam"]);
+  const words = normalized.split(/\s+/).filter(Boolean);
+  return words.length > 0 && words.every((word) => roleWords.has(word));
+}
+
 function beneficiaryBlock(text: string) {
   const lines = splitLines(text);
-  const nameMatch = labeledValueByAliasPriority(text, "beneficiaryName");
-  const schoolName = labeledValue(text, "siteName")?.value ?? "";
-  const contactName = labeledValueForCandidates(text, ["Contact Person (School Head/ICT Teacher)", "Contact Person", "School Contact", "Primary Contact"])?.value ?? "";
+  const contactMatch = labeledValueForCandidates(text, ["Contact Person (School Head/ICT Teacher)", "Contact Person", "School Contact", "Primary Contact"]);
+  const beneficiaryMatch = labeledValueForCandidates(text, ["Beneficiary"]);
   const explicitRole = labeledValue(text, "beneficiaryRole")?.value ?? "";
   const explicitPhone = labeledValue(text, "beneficiaryPhone")?.value ?? "";
+  const contactName = contactMatch?.value ?? "";
+  const usableContactName = Boolean(contactName && !isContactPlaceholder(contactName));
+  const nameMatch = usableContactName ? contactMatch : beneficiaryMatch;
   if (!nameMatch) return { name: "", role: explicitRole, phone: explicitPhone, source: "" };
   const followers = lines.slice(nameMatch.index + 1).map((line) => line.raw.trim()).filter(Boolean);
   const unlabeled = followers.filter((line) => !line.includes(":"));
   const phoneIndex = unlabeled.findIndex((line) => /(?:\+?63|0)\s*\d[\d\s()-]{7,}/.test(line));
-  const usedContactPerson = Boolean(schoolName && normalizeLabel(nameMatch.value) === normalizeLabel(schoolName) && contactName);
-  const name = usedContactPerson ? contactName : nameMatch.value;
-  const source = usedContactPerson || Boolean(contactName && normalizeLabel(name) === normalizeLabel(contactName)) ? "School Head/ICT Teacher contact" : "Beneficiary label";
+  const usedContactPerson = Boolean(usableContactName && contactMatch && nameMatch.index === contactMatch.index);
+  const name = nameMatch.value;
+  const source = usedContactPerson ? "School Head/ICT Teacher contact" : "Beneficiary label";
   return {
     name,
     role: explicitRole || (phoneIndex > 0 ? unlabeled[phoneIndex - 1] : unlabeled.find((line) => !/(?:\+?63|0)\s*\d/.test(line)) ?? ""),
