@@ -591,7 +591,10 @@ export default function TrackerApp() {
       navigate(href || pathForPage(dest), { bypassGuard: true });
       notify("Site record saved.");
     }
-    catch (error) { notify(error instanceof Error ? error.message : "Unable to save site record."); }
+    catch (error) {
+      notify(error instanceof Error ? error.message : "Unable to save site record.");
+      throw error;
+    }
   }
   async function deleteSite(record: Installation) {
     try {
@@ -1297,6 +1300,7 @@ function InstallationForm({
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [triedSubmit, setTriedSubmit] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const [excelCopyState, setExcelCopyState] = useState<"idle" | "first" | "last" | "error">("idle");
@@ -1317,7 +1321,7 @@ function InstallationForm({
   const isDirty = useMemo(() => {
     return JSON.stringify(record) !== JSON.stringify(original);
   }, [record, original]);
-  const patch = (data: Partial<Installation>) => setRecord((r) => ({ ...r, ...data }));
+  const patch = (data: Partial<Installation>) => { setSaveError(""); setRecord((r) => ({ ...r, ...data })); };
   const extractionHighlight = (key: string) => extractionHighlights.includes(key) ? " extraction-filled" : "";
 
   useEffect(() => {
@@ -1687,7 +1691,8 @@ function InstallationForm({
   const invalidBeneficiaryPhoneContact = beneficiaryContacts.find((contact) => contact.phone.trim() && !validPhone(contact.phone));
   const beneficiaryNameInvalid = (contact: BeneficiaryContact) => triedSubmit && ((missingBeneficiaryContact && !completeBeneficiaryContact && !contact.name.trim()) || (contactHasValue(contact) && !contact.name.trim()));
   const beneficiaryPhoneInvalid = (contact: BeneficiaryContact) => triedSubmit && ((missingBeneficiaryContact && !completeBeneficiaryContact && !contact.phone.trim()) || (contactHasValue(contact) && !contact.phone.trim()) || (contact.phone.trim() && !validPhone(contact.phone)));
-  const hasValidationError = Boolean(missingSiteName || !schoolId || invalidDirectoryIdentity || duplicateSchoolId || missingUnitType || missingContractor || missingLocation || missingLatitude || missingLongitude || invalidLatitude || invalidLongitude || missingRequiredCustomField || missingEquipment || invalidMac || invalidInteger || missingComponentValue || (duplicateMac && !duplicateMac.duplicateMacAcknowledged) || missingBeneficiaryContact || incompleteBeneficiaryContact || invalidBeneficiaryPhoneContact);
+  const hasClientValidationError = Boolean(missingSiteName || !schoolId || duplicateSchoolId || missingUnitType || missingContractor || missingLocation || missingLatitude || missingLongitude || invalidLatitude || invalidLongitude || missingRequiredCustomField || missingEquipment || invalidMac || invalidInteger || missingComponentValue || (duplicateMac && !duplicateMac.duplicateMacAcknowledged) || missingBeneficiaryContact || incompleteBeneficiaryContact || invalidBeneficiaryPhoneContact);
+  const hasValidationError = hasClientValidationError || invalidDirectoryIdentity;
   const validationItems = [
     missingSiteName && { id: "site-name-error", target: "site-name-input", text: "Enter a site name." },
     !schoolId && { id: "school-id-required-error", target: "school-id-input", text: "Enter the official School ID." },
@@ -1805,11 +1810,14 @@ function InstallationForm({
   }
   async function persistRecord() {
     setSaving(true);
+    setSaveError("");
     const next = savedRecord();
     try {
       await onSave(next);
       setRecord(next);
       setOriginal(JSON.parse(JSON.stringify(next)));
+    } catch (error) {
+      setSaveError(errorMessage(error, "Unable to save site record."));
     } finally {
       setSaving(false);
     }
@@ -1817,7 +1825,7 @@ function InstallationForm({
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (saving || !isDirty) return;
-    if (hasValidationError) { showValidationErrors(); return; }
+    if (hasClientValidationError) { showValidationErrors(); return; }
     if (!await validateDirectoryBeforeSave()) return;
     await persistRecord();
   }
@@ -1933,7 +1941,7 @@ function InstallationForm({
 
   async function handleSaveAndExit() {
     if (saving) return;
-    if (hasValidationError) { setShowExitModal(false); showValidationErrors(); return; }
+    if (hasClientValidationError) { setShowExitModal(false); showValidationErrors(); return; }
     if (!await validateDirectoryBeforeSave()) { setShowExitModal(false); return; }
     setShowExitModal(false);
     await persistRecord();
@@ -1970,6 +1978,7 @@ function InstallationForm({
   return <form onSubmit={submit} data-save-shortcut="site-form" noValidate>
     <div className="page-head site-record-head"><div><p className="eyebrow">{initial ? "Site record" : "New site"}</p><div className="site-record-heading-row"><h1>{initial ? initial.siteName || "Site name required" : "Add a site record"}</h1>{initial && <StatusPill status={record.status} refs={refs} className="site-record-status" />}</div>{initial && <div className="small muted record-id">School ID: {initial.id}</div>}<p className="muted site-record-description">{initial ? readOnly ? "Review site details, contractor visits, and change history." : "Update site details and deployed equipment." : "Enter the school, location, equipment, and contact details."}</p></div><div className="site-record-actions"><div className="site-record-main-actions">{initial && !readOnly && onDelete && <button type="button" className="button danger" disabled={saving || deleting} onClick={() => setShowDeleteModal(true)}><Trash2 size={15} />Delete site</button>}<button type="button" className="button" disabled={saving || deleting} onClick={() => { if (isDirty) { setShowExitModal(true); } else { onCancel(); } }}>Back to sites</button></div></div></div>
     <div className="tabs" role="tablist" aria-label="Site record sections" onKeyDown={handleTabKeyDown}><button type="button" id="site-tab-overview" role="tab" aria-controls="site-panel-overview" aria-selected={tab === "overview"} tabIndex={tab === "overview" ? 0 : -1} className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}>Overview</button><button type="button" id="site-tab-visits" role="tab" aria-controls="site-panel-visits" aria-selected={tab === "visits"} tabIndex={tab === "visits" ? 0 : -1} className={tab === "visits" ? "active" : ""} onClick={() => void openVisits()}>Service visits {visitsLoaded && <span>{serviceVisits.length}</span>}</button><button type="button" id="site-tab-audit" role="tab" aria-controls="site-panel-audit" aria-selected={tab === "audit"} tabIndex={tab === "audit" ? 0 : -1} className={tab === "audit" ? "active" : ""} onClick={() => void openAudit()}>Change log {auditLoaded && <span>{auditEvents.length}</span>}</button></div>
+    {saveError && <div className="notice validation-notice inline" role="alert"><strong>Unable to save site record.</strong> {saveError}</div>}
     {triedSubmit && hasValidationError && <div className="notice validation-notice validation-summary inline" role="alert" tabIndex={-1} ref={validationSummaryRef}><strong>Check the highlighted site details before saving.</strong><ul>{validationItems.map((item) => <li key={`${item.id}:${item.target}`}><a href={`#${item.target}`} onClick={(event) => { event.preventDefault(); focusValidationTarget(item.target); }}>{item.text}</a></li>)}</ul></div>}
     {tab === "overview" && <div className="site-workflow-bar" aria-label="Overview workflow">
       <div className="site-workflow-summary"><strong>{record.siteName.trim() || (initial ? "Site name required" : "New site record")}</strong><div className="site-workflow-meta" aria-label="Site record status">{workflowMeta.map((item) => <span className={`site-workflow-chip ${item.label === "State" || item.label === "Mode" ? "state" : ""}`} key={item.label}><span>{item.label}</span><strong>{item.value}</strong></span>)}</div></div>

@@ -18,6 +18,7 @@ let cachedUsersAt = 0;
 let usersRequest: Promise<Profile[]> | undefined;
 const usersCacheMs = 60_000;
 const operationalCacheMs = 60_000;
+const supabasePageSize = 1000;
 const defaultSiteStatuses: StatusReferenceOption[] = [
   { id: "status-scheduled", value: "scheduled", name: "Scheduled", active: true, order: 0, color: "#2f6fcb" },
   { id: "status-installed", value: "installed", name: "Installed", active: true, order: 1, color: "#138a54" },
@@ -87,6 +88,21 @@ function mapSchoolDirectoryEntry(row: any): SchoolDirectoryEntry {
     sourceRow: row.source_row,
     warning: row.validation_warning || "",
   };
+}
+async function fetchAllRows(queryFactory: (from: number, to: number) => any) {
+  const rows: any[] = [];
+  for (let from = 0; ; from += supabasePageSize) {
+    const to = from + supabasePageSize - 1;
+    const { data, error } = await queryFactory(from, to);
+    if (error) throw error;
+    rows.push(...(data ?? []));
+    if (!data || data.length < supabasePageSize) return rows;
+  }
+}
+function chunk<T>(items: T[], size: number) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) chunks.push(items.slice(index, index + size));
+  return chunks;
 }
 
 const schoolDirectoryColumns = "id,school_id,site_code,school_name,island_group,region_name,region_code,province_name,province_code,municipality_name,municipality_code,barangay_name,barangay_code,priority_tag,source_row,validation_warning";
@@ -354,8 +370,11 @@ async function mapInstallation(row: any, locationNames: Map<string, string>): Pr
 }
 async function locationNamesFor(rows: any[]) {
   const codes = [...new Set(rows.flatMap((row) => [row.region_code, row.province_code, row.municipality_code, row.barangay_code]).filter(Boolean))];
-  const { data, error } = codes.length ? await supabase().from("locations").select("psgc_code,name").in("psgc_code", codes) : { data: [], error: null };
-  if (error) throw error;
+  const data = (await Promise.all(chunk(codes, 500).map(async (batch) => {
+    const { data: batchRows, error } = await supabase().from("locations").select("psgc_code,name").in("psgc_code", batch);
+    if (error) throw error;
+    return batchRows ?? [];
+  }))).flat();
   return new Map(data.map((row) => [row.psgc_code, row.name]));
 }
 function mapInstallationSummary(row: any, locationNames: Map<string, string>): Installation {
@@ -374,24 +393,22 @@ function mapInstallationSummary(row: any, locationNames: Map<string, string>): I
 }
 
 export async function loadInstallationSummaries() {
-  const { data, error } = await supabase().from("installations").select(`
+  const data = await fetchAllRows((from, to) => supabase().from("installations").select(`
     id,school_id,site_name,kit_number,installer_team_lead,install_date,activation_date,status,region_code,province_code,municipality_code,barangay_code,contractor_address,longitude,latitude,beneficiary_contacts,beneficiary_name,beneficiary_role,beneficiary_phone,remarks,created_at,updated_at,
     unitType:unit_types(name),contractor:contractors(name),createdBy:profiles!installations_created_by_fkey(full_name),updatedBy:profiles!installations_updated_by_fkey(full_name),
     installation_custom_values(field_id,value),installation_components(id)
-  `).order("created_at", { ascending: false });
-  if (error) throw error;
+  `).order("created_at", { ascending: false }).range(from, to));
   const locationNames = await locationNamesFor(data);
   return data.map((row) => mapInstallationSummary(row, locationNames));
 }
 
 export async function loadServiceVisitSummaries() {
-  const { data, error } = await supabase().from("installations").select(`
+  const data = await fetchAllRows((from, to) => supabase().from("installations").select(`
     id,school_id,site_name,kit_number,installer_team_lead,install_date,activation_date,status,region_code,province_code,municipality_code,barangay_code,contractor_address,longitude,latitude,beneficiary_contacts,beneficiary_name,beneficiary_role,beneficiary_phone,remarks,created_at,updated_at,
     unitType:unit_types(name),contractor:contractors(name),createdBy:profiles!installations_created_by_fkey(full_name),updatedBy:profiles!installations_updated_by_fkey(full_name),
     installation_components(id),
     service_visits(id,display_id,status,ticket_reference,scheduled_date,completed_date,notes,created_at,updated_at,type:service_visit_types(name),contractor:contractors(name),createdBy:profiles!service_visits_created_by_fkey(full_name),updatedBy:profiles!service_visits_updated_by_fkey(full_name))
-  `).order("created_at", { ascending: false });
-  if (error) throw error;
+  `).order("created_at", { ascending: false }).range(from, to));
   const locationNames = await locationNamesFor(data);
   return Promise.all(data.map(async (row) => ({ ...mapInstallationSummary(row, locationNames), serviceVisits: await Promise.all((row.service_visits || []).map(mapVisit)) })));
 }
@@ -404,8 +421,7 @@ const installationDetailSelect = `
 const serviceVisitDetailSelect = "*,type:service_visit_types(name),contractor:contractors(name),createdBy:profiles!service_visits_created_by_fkey(full_name),updatedBy:profiles!service_visits_updated_by_fkey(full_name),service_visit_photos(storage_path,caption),service_visit_component_changes(*)";
 
 export async function loadInstallations() {
-  const { data, error } = await supabase().from("installations").select(installationDetailSelect).order("created_at", { ascending: false });
-  if (error) throw error;
+  const data = await fetchAllRows((from, to) => supabase().from("installations").select(installationDetailSelect).order("created_at", { ascending: false }).range(from, to));
   const locationNames = await locationNamesFor(data);
   return Promise.all(data.map((row) => mapInstallation(row, locationNames)));
 }
@@ -418,11 +434,10 @@ export async function loadInstallationByDisplayId(displayId: string) {
 }
 
 export async function loadInstallationDuplicateValidationRecords() {
-  const { data, error } = await supabase().from("installations").select(`
+  const data = await fetchAllRows((from, to) => supabase().from("installations").select(`
     id,school_id,site_name,
     installation_components(id,notes,installed_at,removed_at,installed_via_visit_id,removed_via_visit_id,type:component_types(name),installation_component_values(field_definition_id,value,duplicate_mac_acknowledged))
-  `);
-  if (error) throw error;
+  `).range(from, to));
   return data.map((row) => ({
     id: row.school_id, dbId: row.id, siteName: row.site_name || "", unitType: "", contractor: "", installerTeamLead: "", installDate: "", status: "scheduled" as const,
     islandGroup: "" as const, region: "", regionCode: "", province: "", provinceCode: "", municipality: "", municipalityCode: "", barangay: "", barangayCode: "",
@@ -453,12 +468,11 @@ export async function loadInstallationForVisitDisplayId(displayId: string) {
 }
 
 export async function loadInstallationValidationRecords() {
-  const { data, error } = await supabase().from("installations").select(`
+  const data = await fetchAllRows((from, to) => supabase().from("installations").select(`
     id,school_id,site_name,kit_number,installer_team_lead,install_date,activation_date,status,region_code,province_code,municipality_code,barangay_code,contractor_address,longitude,latitude,beneficiary_contacts,beneficiary_name,beneficiary_role,beneficiary_phone,remarks,created_at,updated_at,
     unitType:unit_types(name),contractor:contractors(name),createdBy:profiles!installations_created_by_fkey(full_name),updatedBy:profiles!installations_updated_by_fkey(full_name),
     installation_custom_values(field_id,value),installation_components(*,type:component_types(name),installation_component_values(field_definition_id,value,duplicate_mac_acknowledged))
-  `).order("install_date", { ascending: false });
-  if (error) throw error;
+  `).order("install_date", { ascending: false }).range(from, to));
   const locationNames = await locationNamesFor(data);
   return data.map((row) => ({ ...mapInstallationSummary(row, locationNames), components: row.installation_components.map(mapComponent) }));
 }
